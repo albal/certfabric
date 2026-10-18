@@ -115,7 +115,7 @@ class DeviceOut(BaseModel):
     credentials: DeviceCredentialsOut
     polling_interval_minutes: int
     assigned_certificate_id: str | None
-    state: str = Field(description="MONITOR_ONLY when no Certificate is assigned, otherwise the classification")
+    state: str = Field(description="UNREACHABLE, MONITOR_ONLY when no Certificate is assigned, otherwise the classification")
     presented_certificate: PresentedCertificate | None
     consecutive_probe_failures: int
     last_probe_error: str | None
@@ -164,6 +164,12 @@ def _masked(creds: DeviceCredentials) -> DeviceCredentialsOut:
     )
 
 
+def _state(device: Device) -> str:
+    if device.drift_status == "UNREACHABLE":
+        return "UNREACHABLE"  # Worth showing even for a Monitor-only Device.
+    return "MONITOR_ONLY" if device.assigned_cert_id is None else device.drift_status
+
+
 def device_out(device: Device, vault: Vault) -> DeviceOut:
     presented = None
     if device.presented_fingerprint:
@@ -186,7 +192,7 @@ def device_out(device: Device, vault: Vault) -> DeviceOut:
         credentials=_masked(_credentials(device, vault)),
         polling_interval_minutes=device.polling_interval_minutes,
         assigned_certificate_id=device.assigned_cert_id,
-        state="MONITOR_ONLY" if device.assigned_cert_id is None else device.drift_status,
+        state=_state(device),
         presented_certificate=presented,
         consecutive_probe_failures=device.consecutive_probe_failures,
         last_probe_error=device.last_probe_error,

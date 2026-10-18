@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 
 from sqlalchemy import select
@@ -13,12 +13,21 @@ from starlette.datastructures import State
 
 from certfabric.deployments import DeploymentRefused
 from certfabric.models import Certificate, DeploymentLog, Device
+from certfabric.notifier import EventType, Level
 from certfabric.probe import ProbeResult, probe
 
 log = logging.getLogger(__name__)
 
 SWEEP_INTERVAL = timedelta(minutes=1)
 MAX_CONCURRENT_PROBES = 256
+UNREACHABLE_AFTER_FAILURES = 3
+
+
+@dataclass
+class Notice:
+    event: EventType
+    message: str
+    level: Level
 
 
 @dataclass
@@ -26,9 +35,9 @@ class FollowUp:
     """Something to do once the Probe results are committed."""
 
     device: Device
-    certificate: Certificate | None
+    certificate: Certificate | None = None
     heal_trigger: str | None = None
-    drift_started: bool = False
+    notices: list[Notice] = field(default_factory=list)
 
 
 def is_due(device: Device, state: State) -> bool:
@@ -68,7 +77,15 @@ async def apply_probe(db: AsyncSession, device: Device, result: ProbeResult, sta
     if result.presented is None:
         device.consecutive_probe_failures += 1
         device.last_probe_error = result.error
+        if device.consecutive_probe_failures == UNREACHABLE_AFTER_FAILURES:
+            device.drift_status = "UNREACHABLE"
+            message = f"{device.name} has failed {UNREACHABLE_AFTER_FAILURES} Probes in a row: {result.error}"
+            return FollowUp(device=device, notices=[Notice("device_unreachable", message, "error")])
         return None
+    notices: list[Notice] = []
+    if device.drift_status == "UNREACHABLE":
+        notices.append(Notice("device_recovered", f"{device.name} is reachable again", "info"))
+        device.drift_status = "UNKNOWN"
     presented = result.presented
     device.consecutive_probe_failures = 0
     device.last_probe_error = None
@@ -79,36 +96,34 @@ async def apply_probe(db: AsyncSession, device: Device, result: ProbeResult, sta
     device.presented_serial = presented.serial_number
     device.presented_expires_at = presented.not_after
 
-    if device.assigned_cert_id is None:
-        return None  # Monitor-only: observed, never classified.
-    assigned = await db.get(Certificate, device.assigned_cert_id)
+    assigned = await db.get(Certificate, device.assigned_cert_id) if device.assigned_cert_id else None
     if assigned is None:
-        return None
+        # Monitor-only: observed, never classified.
+        return FollowUp(device=device, notices=notices) if notices else None
     previous = device.drift_status
     device.drift_status = await classify(db, device, assigned)
-    if device.drift_status == "IN_SYNC":
-        return None
-    trigger = {"DRIFT_DETECTED": "DRIFT_HEAL", "OUTDATED": "OUTDATED_HEAL", "UNKNOWN": "INITIAL_SETUP"}[
+    if device.drift_status == "DRIFT_DETECTED" and previous != "DRIFT_DETECTED":
+        notices.append(
+            Notice(
+                "drift_detected",
+                f"{device.name} is serving a certificate CertFabric did not deploy "
+                f"(fingerprint {device.presented_fingerprint}); redeploying",
+                "warning",
+            )
+        )
+    trigger = {"DRIFT_DETECTED": "DRIFT_HEAL", "OUTDATED": "OUTDATED_HEAL", "UNKNOWN": "INITIAL_SETUP"}.get(
         device.drift_status
-    ]
-    return FollowUp(
-        device=device,
-        certificate=assigned,
-        heal_trigger=trigger,
-        drift_started=device.drift_status == "DRIFT_DETECTED" and previous != "DRIFT_DETECTED",
     )
+    if trigger is None and not notices:
+        return None
+    return FollowUp(device=device, certificate=assigned, heal_trigger=trigger, notices=notices)
 
 
 async def follow_up(state: State, actions: list[FollowUp]) -> None:
     for action in actions:
-        if action.drift_started:
+        for notice in action.notices:
             await state.notifier.emit(
-                "drift_detected",
-                f"{action.device.name} is serving a certificate CertFabric did not deploy "
-                f"(fingerprint {action.device.presented_fingerprint}); redeploying",
-                device=action.device,
-                certificate=action.certificate,
-                level="warning",
+                notice.event, notice.message, device=action.device, certificate=action.certificate, level=notice.level
             )
         if action.heal_trigger and not state.deployer.is_running(action.device.id):
             try:
