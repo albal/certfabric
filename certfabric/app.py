@@ -8,10 +8,11 @@ from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, FastAPI
 
-from certfabric import devices
+from certfabric import devices, spa
 from certfabric.acme import AcmeRunner
 from certfabric.api import auth as auth_api
 from certfabric.api import certificates as certificates_api
+from certfabric.api import dashboard as dashboard_api
 from certfabric.api import devices as devices_api
 from certfabric.api import dns_providers as dns_providers_api
 from certfabric.api import events as events_api
@@ -43,6 +44,7 @@ PROTECTED_ROUTERS: list[APIRouter] = [
     jobs_api.router,
     webhooks_api.router,
     events_api.router,
+    dashboard_api.router,
 ]
 
 
@@ -85,6 +87,8 @@ def create_app(settings: Settings, clock: Clock | None = None) -> FastAPI:
     app.include_router(auth_api.router)
     for router in PROTECTED_ROUTERS:
         app.include_router(router, dependencies=[Depends(require_session)])
+    if dist := spa.find_dist(settings.frontend_dir):
+        spa.mount(app, dist)  # last, so it never shadows an API route
     return app
 
 
