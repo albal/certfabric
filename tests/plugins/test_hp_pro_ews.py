@@ -57,15 +57,51 @@ def test_asks_the_engine_for_a_leaf_only_bundle():
     assert HpProEwsPlugin.pfx_include_chain is False
 
 
-async def test_session_and_csrf_are_used(simulator, make_plugin, good_credentials):
+def test_asks_the_engine_for_a_short_passphrase():
+    assert HpProEwsPlugin.pfx_passphrase_max_length == 16
+
+
+async def test_walks_the_emweb_certificate_wizard(simulator, make_plugin, good_credentials):
     cert = make_certificate("printer.lan.example.com")
     plugin = make_plugin(good_credentials, print)
     assert await plugin.deploy_certificate(cert.cert_pem, cert.key_pem, cert.fullchain_pem, cert.pkcs12("one-time"), "one-time")
     assert simulator.uploads == 1
-    get, post = simulator.https.requests[-2:]
-    assert (get.method, get.path) == ("GET", "/Security/Certificates")
-    assert post.cookies()["sid"]
+    assert [(r.method, r.path) for r in simulator.https.requests] == [
+        ("GET", "/hp/device/set_config_networkCerts.html"),
+        ("POST", "/hp/device/set_config_networkCerts.html/config"),
+        ("POST", "/hp/device/set_config_networkPrintCerts.html/config"),
+        ("GET", "/hp/device/set_config_networkCertsImport.html"),
+        ("POST", "/hp/device/Certificate.pfx"),
+    ]
     assert await plugin.post_deployment_verify(cert.fingerprint_sha256)
+
+
+async def test_printer_without_an_admin_password(good_credentials):
+    from certfabric.plugins.base import DeviceCredentials
+
+    printer = await FakeHpPrinter(admin_password=None).start()
+    try:
+        plugin = HpProEwsPlugin(printer.host, printer.port, DeviceCredentials(), options={"cycle_wait": 0}, log=print)
+        result = await plugin.test_connection()
+        assert result.success, result.message
+        assert "M283fdw" in result.message
+        cert = make_certificate()
+        assert await plugin.deploy_certificate(cert.cert_pem, cert.key_pem, cert.fullchain_pem, cert.pkcs12("pw"), "pw")
+        assert await plugin.post_deployment_verify(cert.fingerprint_sha256)
+    finally:
+        await printer.stop()
+
+
+async def test_not_an_emweb_printer(simulator, make_plugin, good_credentials):
+    from tests.fakes.https_device import Response
+
+    async def other(_request):
+        return Response(404)
+
+    simulator.https.handler = other
+    result = await make_plugin(good_credentials, print).test_connection()
+    assert not result.success
+    assert "404" in result.message
 
 
 async def test_printer_rejects_a_bundle_with_a_chain(make_plugin, good_credentials):
@@ -110,6 +146,28 @@ async def test_end_to_end_through_the_engine(client, simulator):
     assert job["state"] == "succeeded", job
     assert fingerprint(simulator.https.cert_pem) == cert["fingerprint_sha256"]
     assert hp_printer.PASSWORD not in job["output"]
+
+
+async def test_engine_refuses_a_fixed_passphrase_the_printer_cannot_take(client, simulator):
+    from tests.conftest import deploy, issue_certificate
+
+    cert = await issue_certificate(client, ["printer.lan.example.com"])
+    device = await client.post(
+        "/api/devices",
+        json={
+            "name": "HP",
+            "hostname": simulator.host,
+            "port": simulator.port,
+            "sni": "printer.lan.example.com",
+            "plugin_id": "hp_pro_ews",
+            "credentials": {"password": hp_printer.PASSWORD, "pfx_passphrase": "x" * 17},
+            "certificate_id": cert["id"],
+        },
+    )
+    job = await deploy(client, device.json()["id"])
+    assert job["state"] == "failed"
+    assert "16 characters" in job["error"]
+    assert simulator.uploads == 0
 
 
 async def test_works_with_firmware_that_only_speaks_legacy_tls(make_plugin, good_credentials):
