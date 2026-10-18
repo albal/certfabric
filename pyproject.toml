@@ -1,6 +1,7 @@
 [project]
 name = "certfabric"
 version = "0.1.0"
+readme = "README.md"
 description = "Agentless certificate lifecycle management for LAN and homelab devices"
 requires-python = ">=3.11"
 dependencies = [
@@ -31,6 +32,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["certfabric"]
+# The built dashboard (copied to certfabric/static by the Dockerfile and install script) is not in git.
+artifacts = ["certfabric/static/**"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
