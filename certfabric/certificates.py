@@ -15,6 +15,17 @@ from certfabric.models import Certificate, DnsProvider
 from certfabric.x509util import check_key_matches, info_from_pem
 
 
+def covers(sans: list[str], name: str) -> bool:
+    """Whether a Certificate with these SANs is valid for `name` (a wildcard covers one label)."""
+    name = name.lower().rstrip(".")
+    for san in (s.lower() for s in sans):
+        if san == name:
+            return True
+        if san.startswith("*.") and "." in name and name.split(".", 1)[1] == san[2:]:
+            return True
+    return False
+
+
 def derived_status(cert: Certificate, now: datetime, threshold_days: int) -> str:
     if cert.status != "VALID":
         return cert.status

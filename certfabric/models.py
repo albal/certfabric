@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, TypeDecorator
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, TypeDecorator
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -112,3 +112,17 @@ class AuthSession(Base):
     token_hash: Mapped[str] = mapped_column(String, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+
+
+class DeploymentLog(Base):
+    __tablename__ = "deployment_logs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), nullable=False)
+    cert_id: Mapped[str] = mapped_column(ForeignKey("certificates.id", ondelete="CASCADE"), nullable=False)
+    # MANUAL, DRIFT_HEAL, OUTDATED_HEAL, RENEWAL, RETRY or INITIAL_SETUP
+    trigger_source: Mapped[str] = mapped_column(String, nullable=False)
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    execution_time_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    log_output: Mapped[str | None] = mapped_column(Text)
+    timestamp: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)

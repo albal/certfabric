@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import httpx
 import pytest
@@ -14,10 +15,12 @@ from certfabric.app import create_app
 from certfabric.clock import FakeClock
 from certfabric.config import Settings
 from certfabric.scheduler import Scheduler
+from tests.fakes import fake_device_control
 from tests.fakes.acme_harness import FakeAcme
 from tests.fakes.tls_device import FakeTlsDevice
 
 ADMIN_PASSWORD = "correct horse battery staple"
+TEST_PLUGINS = Path(__file__).parent / "fakes" / "plugins"
 BASE_URL = "http://certfabric.test"
 
 
@@ -37,6 +40,7 @@ def settings(tmp_path, fake_acme: FakeAcme) -> Settings:
         secret_key=Fernet.generate_key(),
         db_path=tmp_path / "certfabric.db",
         acme_sh=str(fake_acme.executable),
+        plugin_dirs=(TEST_PLUGINS,),
         run_scheduler=False,
     )
 
@@ -52,6 +56,7 @@ async def app(settings: Settings, clock: FakeClock) -> AsyncIterator[FastAPI]:
 async def tls_device() -> AsyncIterator[FakeTlsDevice]:
     """A running fake Device presenting a factory self-signed certificate."""
     device = await FakeTlsDevice().start()
+    fake_device_control.register(device)
     yield device
     await device.stop()
 
@@ -91,6 +96,7 @@ async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
 
 
 CF_TOKEN = "cf-token-0123456789abcdef"
+DEVICE_PASSWORD = "device-password-0123456789"
 
 
 async def wait_for_job(client: httpx.AsyncClient, job_id: str) -> dict:
@@ -127,9 +133,23 @@ async def create_device(client: httpx.AsyncClient, tls_device: FakeTlsDevice, **
         "name": "Printer",
         "hostname": tls_device.host,
         "port": tls_device.port,
-        "plugin_id": "generic_ssh_hook",
+        "plugin_id": "fake_device",
+        "credentials": {"username": "admin", "password": DEVICE_PASSWORD},
         **extra,
     }
     response = await client.post("/api/devices", json=body)
     assert response.status_code == 201, response.text
     return response.json()
+
+
+async def managed_device(client: httpx.AsyncClient, tls_device: FakeTlsDevice, domain: str = "printer.lan.example.com", **extra) -> tuple[dict, dict]:
+    """A Device with a freshly issued Certificate assigned (not yet deployed)."""
+    cert = await issue_certificate(client, [domain])
+    device = await create_device(client, tls_device, sni=domain, certificate_id=cert["id"], **extra)
+    return device, cert
+
+
+async def deploy(client: httpx.AsyncClient, device_id: str) -> dict:
+    response = await client.post(f"/api/devices/{device_id}/deploy")
+    assert response.status_code == 202, response.text
+    return await wait_for_job(client, response.json()["job_id"])

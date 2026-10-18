@@ -15,13 +15,16 @@ from certfabric.api import certificates as certificates_api
 from certfabric.api import devices as devices_api
 from certfabric.api import dns_providers as dns_providers_api
 from certfabric.api import jobs as jobs_api
+from certfabric.api import plugins as plugins_api
 from certfabric.api import settings as settings_api
 from certfabric.api import system as system_api
 from certfabric.api.deps import require_session
 from certfabric.clock import Clock, SystemClock
 from certfabric.config import Settings, load_settings
 from certfabric.db import Database, migrate
+from certfabric.deployments import Deployer
 from certfabric.jobs import JobRegistry
+from certfabric.plugins.registry import BUILTIN_DIR, PluginRegistry
 from certfabric.scheduler import Scheduler
 from certfabric.vault import Vault
 
@@ -32,6 +35,7 @@ PROTECTED_ROUTERS: list[APIRouter] = [
     dns_providers_api.router,
     certificates_api.router,
     devices_api.router,
+    plugins_api.router,
     jobs_api.router,
 ]
 
@@ -63,6 +67,8 @@ def create_app(settings: Settings, clock: Clock | None = None) -> FastAPI:
     app.state.scheduler = Scheduler(clock)
     app.state.jobs = JobRegistry()
     app.state.acme = AcmeRunner(settings.acme_sh)
+    app.state.plugins = PluginRegistry([BUILTIN_DIR, *settings.plugin_dirs])
+    app.state.deployer = Deployer(app.state)
     app.state.scheduler.add_job("probe-sweep", devices.SWEEP_INTERVAL, lambda: devices.sweep(app.state))
 
     app.include_router(auth_api.router)

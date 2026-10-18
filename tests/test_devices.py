@@ -80,7 +80,7 @@ async def test_failed_probe_is_recorded(client, tls_device):
 
 
 async def test_test_connection_before_saving(client, tls_device):
-    body = {"name": "x", "hostname": tls_device.host, "port": tls_device.port, "plugin_id": "generic_ssh_hook"}
+    body = {"name": "x", "hostname": tls_device.host, "port": tls_device.port, "plugin_id": "fake_device"}
     ok = (await client.post("/api/devices/test-connection", json=body)).json()
     assert ok["success"] is True
     assert ok["presented_certificate"]["fingerprint_sha256"] == fingerprint(tls_device.cert_pem)
@@ -88,6 +88,21 @@ async def test_test_connection_before_saving(client, tls_device):
     failed = (await client.post("/api/devices/test-connection", json=body)).json()
     assert failed["success"] is False
     assert (await client.get("/api/devices")).json() == []
+
+
+async def test_test_connection_runs_the_plugin_check(client, tls_device):
+    from tests.fakes import fake_device_control
+
+    device = await create_device(client, tls_device)
+    assert (await client.post(f"/api/devices/{device['id']}/test-connection")).json()["success"] is True
+    fake_device_control.CONTROLS[tls_device.port].bad_credentials = True
+    result = (await client.post(f"/api/devices/{device['id']}/test-connection")).json()
+    assert result == {**result, "success": False, "message": "Login rejected"}
+
+
+async def test_unknown_plugin_is_rejected(client, tls_device):
+    body = {"name": "x", "hostname": "printer.lan", "plugin_id": "not_installed"}
+    assert (await client.post("/api/devices", json=body)).status_code == 422
 
 
 async def test_sweep_honours_each_devices_interval(client, tls_device, scheduler, clock):
