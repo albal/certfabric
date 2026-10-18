@@ -82,8 +82,9 @@ class PluginContract:
         return []
 
     async def _deploy(self, plugin: BaseDevicePlugin, cert: CertificateMaterial) -> bool:
+        passphrase = PASSPHRASE[: plugin.pfx_passphrase_max_length]
         return await plugin.deploy_certificate(
-            cert.cert_pem, cert.key_pem, cert.fullchain_pem, cert.pkcs12(PASSPHRASE), PASSPHRASE
+            cert.cert_pem, cert.key_pem, cert.fullchain_pem, cert.pkcs12(passphrase), passphrase
         )
 
     def test_metadata(self, make_plugin, good_credentials, log_lines):
@@ -136,5 +137,6 @@ class PluginContract:
         await plugin.test_connection()
         await self._deploy(plugin, certificate)
         output = "\n".join(log_lines)
-        for secret in [*good_credentials.secrets(), PASSPHRASE, certificate.key_pem.splitlines()[1]]:
+        passphrase = PASSPHRASE[: plugin.pfx_passphrase_max_length]
+        for secret in [*good_credentials.secrets(), passphrase, certificate.key_pem.splitlines()[1]]:
             assert secret not in output

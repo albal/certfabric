@@ -7,6 +7,8 @@ Plugins you have read.
 
 from __future__ import annotations
 
+import secrets
+import string
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any, ClassVar
@@ -33,6 +35,12 @@ class DeviceCredentials(BaseModel):
         return [v for v in values if v]
 
 
+def generate_passphrase(max_length: int | None = None) -> str:
+    """A fresh PKCS#12 passphrase: letters and digits only, since device forms can be fussy."""
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(min(24, max_length or 24)))
+
+
 def describe(exc: BaseException) -> str:
     """An exception as a message for the admin, even when it has no text of its own."""
     return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
@@ -55,6 +63,8 @@ class BaseDevicePlugin(ABC):
     supported_models: ClassVar[list[str]]
     # Whether the PKCS#12 bundle handed to deploy_certificate includes the intermediate chain.
     pfx_include_chain: ClassVar[bool] = True
+    # The longest PKCS#12 passphrase the device accepts, if it has a limit.
+    pfx_passphrase_max_length: ClassVar[int | None] = None
 
     def __init__(
         self,

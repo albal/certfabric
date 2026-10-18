@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import secrets
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -15,7 +14,7 @@ from starlette.datastructures import State
 
 from certfabric.jobs import Job, JobFailed
 from certfabric.models import Certificate, DeploymentLog, Device
-from certfabric.plugins.base import DeviceCredentials, PluginError
+from certfabric.plugins.base import DeviceCredentials, PluginError, generate_passphrase
 from certfabric.redaction import Redactor
 from certfabric.x509util import build_pkcs12, info_from_pem, split_pem_chain
 
@@ -133,10 +132,13 @@ class Deployer:
 
         creds = DeviceCredentials(**state.vault.decrypt_json(device.encrypted_credentials or "{}"))
         key_pem = state.vault.decrypt(cert.privkey_pem_encrypted)
-        # A fresh passphrase per Deployment, never stored, unless the Device needs a fixed one.
-        passphrase = creds.pfx_passphrase or secrets.token_urlsafe(18)
-        job.redactor.add([*creds.secrets(), passphrase])
         plugin_cls = state.plugins.get(device.plugin_id)
+        # A fresh passphrase per Deployment, never stored, unless the Device needs a fixed one.
+        passphrase = creds.pfx_passphrase or generate_passphrase(plugin_cls.pfx_passphrase_max_length)
+        job.redactor.add([*creds.secrets(), passphrase])
+        limit = plugin_cls.pfx_passphrase_max_length
+        if limit and len(passphrase) > limit:
+            raise JobFailed(f"The Device's fixed PKCS#12 passphrase is longer than the {limit} characters it accepts")
         chain = split_pem_chain(cert.fullchain_pem)[1:] if plugin_cls.pfx_include_chain else []
         pfx = build_pkcs12(cert.cert_pem, key_pem, passphrase, chain)
         plugin = plugin_cls(
