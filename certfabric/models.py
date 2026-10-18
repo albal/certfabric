@@ -126,3 +126,11 @@ class DeploymentLog(Base):
     execution_time_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     log_output: Mapped[str | None] = mapped_column(Text)
     timestamp: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+
+
+class Webhook(Base):
+    __tablename__ = "webhooks"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    url: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
