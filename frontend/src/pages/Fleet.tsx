@@ -19,7 +19,12 @@ export function FleetPage() {
 
   return (
     <div className="p-6">
-      <h1 className="mb-4 text-xl font-bold text-slate-900">Device Fleet</h1>
+      <div className="mb-4 flex items-center">
+        <h1 className="text-xl font-bold text-slate-900">Device Fleet</h1>
+        <Link to="/devices/new" className="ml-auto bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700">
+          Add Device
+        </Link>
+      </div>
       <div className="overflow-x-auto border border-black bg-white">
         <table className="w-full text-left text-sm" data-testid="fleet-table">
           <thead className="bg-slate-900 text-xs uppercase tracking-wide text-white">
