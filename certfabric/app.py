@@ -8,9 +8,11 @@ from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, FastAPI
 
+from certfabric import devices
 from certfabric.acme import AcmeRunner
 from certfabric.api import auth as auth_api
 from certfabric.api import certificates as certificates_api
+from certfabric.api import devices as devices_api
 from certfabric.api import dns_providers as dns_providers_api
 from certfabric.api import jobs as jobs_api
 from certfabric.api import settings as settings_api
@@ -29,6 +31,7 @@ PROTECTED_ROUTERS: list[APIRouter] = [
     settings_api.router,
     dns_providers_api.router,
     certificates_api.router,
+    devices_api.router,
     jobs_api.router,
 ]
 
@@ -60,6 +63,7 @@ def create_app(settings: Settings, clock: Clock | None = None) -> FastAPI:
     app.state.scheduler = Scheduler(clock)
     app.state.jobs = JobRegistry()
     app.state.acme = AcmeRunner(settings.acme_sh)
+    app.state.scheduler.add_job("probe-sweep", devices.SWEEP_INTERVAL, lambda: devices.sweep(app.state))
 
     app.include_router(auth_api.router)
     for router in PROTECTED_ROUTERS:

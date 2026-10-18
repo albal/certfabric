@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, TypeDecorator
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -65,6 +66,37 @@ class Certificate(Base):
     expires_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, index=True)
     # VALID, REVOKED or SUPERSEDED. EXPIRING and EXPIRED are derived from expires_at.
     status: Mapped[str] = mapped_column(String, nullable=False, default="VALID")
+
+
+class Device(Base):
+    __tablename__ = "devices"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    hostname: Mapped[str] = mapped_column(String, nullable=False)
+    port: Mapped[int] = mapped_column(Integer, nullable=False, default=443)
+    sni: Mapped[str | None] = mapped_column(String)
+    plugin_id: Mapped[str] = mapped_column(String, nullable=False)
+    plugin_options: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    assigned_cert_id: Mapped[str | None] = mapped_column(
+        ForeignKey("certificates.id", ondelete="SET NULL")
+    )
+    encrypted_credentials: Mapped[str | None] = mapped_column(Text)
+    polling_interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=360)
+    presented_fingerprint: Mapped[str | None] = mapped_column(String)
+    presented_issuer: Mapped[str | None] = mapped_column(String)
+    presented_common_name: Mapped[str | None] = mapped_column(String)
+    presented_sans: Mapped[list[str] | None] = mapped_column(JSON)
+    presented_serial: Mapped[str | None] = mapped_column(String)
+    presented_expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    # UNKNOWN until classified, then IN_SYNC, OUTDATED, DRIFT_DETECTED, UNREACHABLE or DEPLOY_FAILED.
+    drift_status: Mapped[str] = mapped_column(String, nullable=False, default="UNKNOWN")
+    consecutive_probe_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    consecutive_deploy_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    last_probe_error: Mapped[str | None] = mapped_column(String)
+    last_scanned_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
 
 
 class AppSetting(Base):
