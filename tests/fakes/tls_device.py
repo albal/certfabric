@@ -15,7 +15,11 @@ class FakeTlsDevice:
     def __init__(self, common_name: str = "factory.local") -> None:
         self.host = "127.0.0.1"
         self.port = 0
+        # Each certificate gets its own context, swapped in per handshake: loading a second
+        # chain into one context keeps both (one per key type) and OpenSSL may pick the old one.
+        self._current: ssl.SSLContext | None = None
         self._context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        self._context.sni_callback = self._select_context
         self._server: asyncio.Server | None = None
         self.cert_pem, self.key_pem = "", ""
         self.present(*self_signed(common_name, datetime.now(UTC)))
@@ -27,7 +31,14 @@ class FakeTlsDevice:
             chain, key = Path(tmp, "chain.pem"), Path(tmp, "key.pem")
             chain.write_text(cert_pem)
             key.write_text(key_pem)
-            self._context.load_cert_chain(chain, key)
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(chain, key)
+            if self._current is None:
+                self._context.load_cert_chain(chain, key)
+            self._current = context
+
+    def _select_context(self, ssl_object: ssl.SSLObject, _server_name: str | None, _context: ssl.SSLContext) -> None:
+        ssl_object.context = self._current
 
     async def start(self) -> FakeTlsDevice:
         # A large backlog lets one fake stand in for hundreds of Devices probed at once.

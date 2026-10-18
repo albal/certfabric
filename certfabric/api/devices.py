@@ -15,7 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from certfabric import devices
 from certfabric.api.deps import get_db
-from certfabric.models import Device
+from certfabric.certificates import covers
+from certfabric.deployments import DeploymentInProgress, DeploymentRefused
+from certfabric.models import Certificate, DeploymentLog, Device
+from certfabric.plugins.base import DeviceCredentials
 from certfabric.probe import probe
 from certfabric.secrets_display import mask
 from certfabric.vault import Vault
@@ -55,14 +58,6 @@ def _is_ip(value: str) -> bool:
     return True
 
 
-class DeviceCredentials(BaseModel):
-    username: str | None = None
-    password: str | None = None
-    api_token: str | None = None
-    pfx_passphrase: str | None = Field(default=None, description="Only for devices that need a fixed PKCS#12 passphrase")
-    extra: dict[str, str] = Field(default_factory=dict, description="Additional secrets a Plugin needs")
-
-
 class DeviceCredentialsOut(BaseModel):
     username: str | None
     password: str | None
@@ -80,6 +75,7 @@ class DeviceCreate(BaseModel):
     plugin_options: dict[str, Any] = Field(default_factory=dict, description="Non-secret Plugin settings")
     credentials: DeviceCredentials = Field(default_factory=DeviceCredentials)
     polling_interval_minutes: int = Field(default=360, ge=5, le=7 * 24 * 60)
+    certificate_id: str | None = Field(default=None, description="Assign a Certificate; omit for Monitor-only")
 
     _host = field_validator("hostname")(_check_host)
     _sni = field_validator("sni")(_check_sni)
@@ -131,6 +127,24 @@ class ConnectionTestResult(BaseModel):
     success: bool
     message: str
     presented_certificate: PresentedCertificate | None = None
+
+
+class Assignment(BaseModel):
+    certificate_id: str | None
+
+
+class JobStarted(BaseModel):
+    job_id: str
+
+
+class DeploymentOut(BaseModel):
+    id: str
+    certificate_id: str
+    trigger_source: str
+    success: bool
+    execution_time_ms: int
+    log_output: str | None
+    timestamp: datetime
 
 
 def _credentials(device: Device, vault: Vault) -> DeviceCredentials:
@@ -194,9 +208,37 @@ async def list_devices(request: Request, db: AsyncSession = Depends(get_db)) -> 
     return [device_out(d, request.app.state.vault) for d in rows]
 
 
+def _require_plugin(request: Request, plugin_id: str) -> None:
+    if request.app.state.plugins.get(plugin_id) is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Plugin {plugin_id!r} is not installed")
+
+
+async def _check_assignment(db: AsyncSession, device: Device, certificate_id: str | None) -> None:
+    """A Certificate can only be assigned to a Device whose name its SANs cover."""
+    if certificate_id is None:
+        return
+    cert = await db.get(Certificate, certificate_id)
+    if cert is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown Certificate")
+    if cert.status in ("SUPERSEDED", "REVOKED"):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Certificate is {cert.status.lower()}")
+    name = device.sni or device.hostname
+    if _is_ip(name):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Device is addressed by IP: set its sni to the hostname the Certificate should cover",
+        )
+    if not covers(cert.san_list, name):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Certificate ({', '.join(cert.san_list)}) does not cover {name}",
+        )
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_device(body: DeviceCreate, request: Request, db: AsyncSession = Depends(get_db)) -> DeviceOut:
     vault: Vault = request.app.state.vault
+    _require_plugin(request, body.plugin_id)
     device = Device(
         id=uuid.uuid4().hex,
         name=body.name,
@@ -212,21 +254,32 @@ async def create_device(body: DeviceCreate, request: Request, db: AsyncSession =
         consecutive_deploy_failures=0,
         created_at=request.app.state.clock.now(),
     )
+    await _check_assignment(db, device, body.certificate_id)
+    device.assigned_cert_id = body.certificate_id
     db.add(device)
     await db.flush()
     return device_out(device, vault)
 
 
-@router.post("/test-connection")
-async def test_connection(body: DeviceCreate) -> ConnectionTestResult:
-    """Check a Device's details before saving them."""
-    result = await probe(body.hostname, body.port, body.sni)
+async def _test(request: Request, device: DeviceCreate | Device, credentials: DeviceCredentials) -> ConnectionTestResult:
+    """TLS reachability, then the Plugin's own check of credentials and compatibility."""
+    result = await probe(device.hostname, device.port, device.sni)
     if result.presented is None:
         return ConnectionTestResult(success=False, message=f"TLS connection failed: {result.error}")
+    plugin_cls = request.app.state.plugins.get(device.plugin_id)
+    if plugin_cls is None:
+        return ConnectionTestResult(success=False, message=f"Plugin {device.plugin_id!r} is not installed")
+    plugin = plugin_cls(device.hostname, device.port, credentials, options=device.plugin_options, sni=device.sni)
+    try:
+        check = await plugin.test_connection()
+    except Exception as exc:  # A Plugin bug must not break the API.
+        check_success, check_message = False, f"Plugin error: {type(exc).__name__}: {exc}"
+    else:
+        check_success, check_message = check.success, check.message
     p = result.presented
     return ConnectionTestResult(
-        success=True,
-        message="TLS connection succeeded",
+        success=check_success,
+        message=check_message,
         presented_certificate=PresentedCertificate(
             common_name=p.common_name,
             sans=p.sans,
@@ -236,6 +289,12 @@ async def test_connection(body: DeviceCreate) -> ConnectionTestResult:
             expires_at=p.not_after,
         ),
     )
+
+
+@router.post("/test-connection")
+async def test_connection(body: DeviceCreate, request: Request) -> ConnectionTestResult:
+    """Check a Device's details before saving them."""
+    return await _test(request, body, body.credentials)
 
 
 @router.get("/{device_id}")
@@ -249,6 +308,8 @@ async def update_device(
 ) -> DeviceOut:
     vault: Vault = request.app.state.vault
     device = await get_device_or_404(db, device_id)
+    if body.plugin_id is not None:
+        _require_plugin(request, body.plugin_id)
     changes = body.model_dump(exclude_unset=True, exclude={"credentials"})
     for field, value in changes.items():
         if value is None and field != "sni":
@@ -256,6 +317,8 @@ async def update_device(
         setattr(device, field, value)
     if body.credentials is not None:
         device.encrypted_credentials = vault.encrypt_json(body.credentials.model_dump())
+    if {"hostname", "sni"} & changes.keys():
+        await _check_assignment(db, device, device.assigned_cert_id)
     await db.flush()
     return device_out(device, vault)
 
@@ -274,3 +337,56 @@ async def probe_now(device_id: str, request: Request) -> DeviceOut:
     await devices.probe_device(state, device_id)
     async with state.db.session() as db:
         return device_out(await get_device_or_404(db, device_id), state.vault)
+
+
+@router.post("/{device_id}/test-connection")
+async def test_saved_connection(device_id: str, request: Request, db: AsyncSession = Depends(get_db)) -> ConnectionTestResult:
+    device = await get_device_or_404(db, device_id)
+    return await _test(request, device, _credentials(device, request.app.state.vault))
+
+
+@router.put("/{device_id}/certificate")
+async def assign_certificate(
+    device_id: str, body: Assignment, request: Request, db: AsyncSession = Depends(get_db)
+) -> DeviceOut:
+    """Assign a Certificate (or null for Monitor-only). The Device is deployed to separately."""
+    device = await get_device_or_404(db, device_id)
+    await _check_assignment(db, device, body.certificate_id)
+    if device.assigned_cert_id != body.certificate_id:
+        device.assigned_cert_id = body.certificate_id
+        device.drift_status = "UNKNOWN"
+    await db.flush()
+    return device_out(device, request.app.state.vault)
+
+
+@router.post("/{device_id}/deploy", status_code=status.HTTP_202_ACCEPTED)
+async def redeploy_now(device_id: str, request: Request) -> JobStarted:
+    """Redeploy Now: deploy the assigned Certificate immediately."""
+    try:
+        job = await request.app.state.deployer.start(device_id, "MANUAL")
+    except DeploymentInProgress as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
+    except DeploymentRefused as exc:
+        code = status.HTTP_404_NOT_FOUND if "not found" in str(exc) else status.HTTP_422_UNPROCESSABLE_CONTENT
+        raise HTTPException(code, str(exc)) from None
+    return JobStarted(job_id=job.id)
+
+
+@router.get("/{device_id}/deployments")
+async def deployment_history(device_id: str, db: AsyncSession = Depends(get_db)) -> list[DeploymentOut]:
+    await get_device_or_404(db, device_id)
+    rows = await db.scalars(
+        select(DeploymentLog).where(DeploymentLog.device_id == device_id).order_by(DeploymentLog.timestamp.desc())
+    )
+    return [
+        DeploymentOut(
+            id=r.id,
+            certificate_id=r.cert_id,
+            trigger_source=r.trigger_source,
+            success=r.success,
+            execution_time_ms=r.execution_time_ms,
+            log_output=r.log_output,
+            timestamp=r.timestamp,
+        )
+        for r in rows
+    ]
