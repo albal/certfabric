@@ -17,6 +17,7 @@ from cryptography.fernet import Fernet
 SECRET_KEY_ENV = "CERTFABRIC_SECRET_KEY"
 SECRET_KEY_FILE_ENV = "CERTFABRIC_SECRET_KEY_FILE"
 DB_PATH_ENV = "CERTFABRIC_DB_PATH"
+ACME_SH_ENV = "CERTFABRIC_ACME_SH"
 
 
 class ConfigError(Exception):
@@ -27,6 +28,7 @@ class ConfigError(Exception):
 class Settings:
     secret_key: bytes
     db_path: Path
+    acme_sh: str = "acme.sh"
     run_scheduler: bool = True
 
 
@@ -35,6 +37,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     return Settings(
         secret_key=_load_secret_key(env),
         db_path=Path(env.get(DB_PATH_ENV, "certfabric.db")),
+        acme_sh=env.get(ACME_SH_ENV, "acme.sh"),
     )
 
 
