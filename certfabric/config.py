@@ -17,6 +17,9 @@ from cryptography.fernet import Fernet
 SECRET_KEY_ENV = "CERTFABRIC_SECRET_KEY"
 SECRET_KEY_FILE_ENV = "CERTFABRIC_SECRET_KEY_FILE"
 DB_PATH_ENV = "CERTFABRIC_DB_PATH"
+ACME_SH_ENV = "CERTFABRIC_ACME_SH"
+PLUGINS_DIR_ENV = "CERTFABRIC_PLUGINS_DIR"
+FRONTEND_DIR_ENV = "CERTFABRIC_FRONTEND_DIR"
 
 
 class ConfigError(Exception):
@@ -27,6 +30,11 @@ class ConfigError(Exception):
 class Settings:
     secret_key: bytes
     db_path: Path
+    acme_sh: str = "acme.sh"
+    # Extra directories of Plugins (each `<name>/plugin.py`), on top of the built-in ones.
+    plugin_dirs: tuple[Path, ...] = ()
+    # The built dashboard; found automatically when not set.
+    frontend_dir: Path | None = None
     run_scheduler: bool = True
 
 
@@ -35,6 +43,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     return Settings(
         secret_key=_load_secret_key(env),
         db_path=Path(env.get(DB_PATH_ENV, "certfabric.db")),
+        acme_sh=env.get(ACME_SH_ENV, "acme.sh"),
+        plugin_dirs=tuple(Path(p) for p in env.get(PLUGINS_DIR_ENV, "").split(os.pathsep) if p),
+        frontend_dir=Path(env[FRONTEND_DIR_ENV]) if env.get(FRONTEND_DIR_ENV) else None,
     )
 
 

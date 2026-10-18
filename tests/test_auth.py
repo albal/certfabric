@@ -18,7 +18,8 @@ def all_routes(routes, prefix=""):
             yield prefix, route
 
 
-PUBLIC_PATHS = {"/api/auth/status", "/api/auth/setup", "/api/auth/login", "/api/auth/logout"}
+# The SPA shell is public; every API and WebSocket route behind it is not.
+PUBLIC_PATHS = {"/api/auth/status", "/api/auth/setup", "/api/auth/login", "/api/auth/logout", "/{path:path}"}
 
 
 async def test_first_run_requires_setup(anon):
@@ -55,9 +56,12 @@ async def test_login_and_logout(client, anon):
     assert (await anon.get("/api/system/info")).status_code == 401
 
 
-async def test_session_expires(client, clock):
-    clock.advance(timedelta(days=8))
-    assert (await client.get("/api/system/info")).status_code == 401
+async def test_session_expires(client, anon, clock):
+    assert (await anon.post("/api/auth/login", json={"password": ADMIN_PASSWORD})).status_code == 204
+    clock.advance(timedelta(days=6))
+    assert (await anon.get("/api/system/info")).status_code == 200
+    clock.advance(timedelta(days=2))
+    assert (await anon.get("/api/system/info")).status_code == 401
 
 
 async def test_every_http_route_requires_a_session(app, anon):

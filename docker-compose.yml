@@ -1,0 +1,21 @@
+# CertFabric with Docker Compose.
+#   1. echo "CERTFABRIC_SECRET_KEY=$(docker run --rm certfabric certfabric generate-key)" > .env
+#      (or any Fernet key; back it up: without it the stored secrets are unreadable)
+#   2. docker compose up -d, then open http://<host>:8080 and set the admin password.
+services:
+  certfabric:
+    build: .
+    image: certfabric
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - certfabric-data:/data
+      # Third-party Plugins: one directory per Plugin containing plugin.py. Read them first.
+      - ./plugins:/app/plugins:ro
+    mem_limit: 512m
+    cpus: 1.0
+
+volumes:
+  certfabric-data:
