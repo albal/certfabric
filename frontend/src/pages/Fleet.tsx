@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 
 import { api, type Certificate, type Device, type Plugin, type Summary } from "../api";
+import { RedeployButton } from "../components/RedeployButton";
 import { ExpiringBadge, StateBadge } from "../components/StateBadge";
 import { daysUntil, formatDate } from "../format";
 
@@ -44,7 +46,11 @@ export function FleetPage() {
               const days = expires ? daysUntil(expires, now) : null;
               return (
                 <tr key={device.id} data-testid="device-row" data-device-id={device.id} className="border-t border-slate-200">
-                  <td className="px-4 py-2 font-semibold text-slate-900">{device.name}</td>
+                  <td className="px-4 py-2 font-semibold text-slate-900">
+                    <Link to="/devices/$deviceId" params={{ deviceId: device.id }} className="hover:text-blue-600 hover:underline">
+                      {device.name}
+                    </Link>
+                  </td>
                   <td className="px-4 py-2 font-mono text-xs">
                     {device.hostname}:{device.port}
                   </td>
@@ -57,6 +63,9 @@ export function FleetPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <StateBadge state={device.state} />
                       {days !== null && days <= threshold && <ExpiringBadge days={days} />}
+                      {(device.state === "DRIFT_DETECTED" || device.state === "DEPLOY_FAILED") && (
+                        <RedeployButton device={device} compact />
+                      )}
                     </div>
                   </td>
                 </tr>

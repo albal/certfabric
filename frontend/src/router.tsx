@@ -11,6 +11,8 @@ import {
 
 import { api, AuthRequired, type AuthStatus } from "./api";
 import { HealthRibbon } from "./components/HealthRibbon";
+import { TerminalProvider } from "./components/Terminal";
+import { DeviceDetailPage } from "./pages/DeviceDetail";
 import { FleetPage } from "./pages/Fleet";
 import { LoginPage } from "./pages/Login";
 
@@ -49,34 +51,36 @@ function Shell() {
     await router.navigate({ to: "/login" });
   }
   return (
-    <div className="flex min-h-screen">
-      <aside className="flex w-56 shrink-0 flex-col bg-slate-900 text-white">
-        <div className="border-b border-slate-700 px-5 py-4 text-lg font-bold tracking-tight">
-          Cert<span className="text-blue-500">Fabric</span>
+    <TerminalProvider>
+      <div className="flex min-h-screen">
+        <aside className="flex w-56 shrink-0 flex-col bg-slate-900 text-white">
+          <div className="border-b border-slate-700 px-5 py-4 text-lg font-bold tracking-tight">
+            Cert<span className="text-blue-500">Fabric</span>
+          </div>
+          <nav className="flex flex-1 flex-col gap-1 p-3 text-sm">
+            {NAV.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                className="rounded px-3 py-2 hover:bg-slate-800"
+                activeProps={{ className: "bg-slate-800 border-l-4 border-blue-600 font-semibold" }}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+          <button onClick={logout} className="m-3 rounded border border-slate-600 px-3 py-2 text-sm hover:bg-slate-800">
+            Sign out
+          </button>
+        </aside>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <HealthRibbon />
+          <main className="flex-1">
+            <Outlet />
+          </main>
         </div>
-        <nav className="flex flex-1 flex-col gap-1 p-3 text-sm">
-          {NAV.map((item) => (
-            <Link
-              key={item.to}
-              to={item.to}
-              className="rounded px-3 py-2 hover:bg-slate-800"
-              activeProps={{ className: "bg-slate-800 border-l-4 border-blue-600 font-semibold" }}
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-        <button onClick={logout} className="m-3 rounded border border-slate-600 px-3 py-2 text-sm hover:bg-slate-800">
-          Sign out
-        </button>
-      </aside>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <HealthRibbon />
-        <main className="flex-1">
-          <Outlet />
-        </main>
       </div>
-    </div>
+    </TerminalProvider>
   );
 }
 
@@ -92,7 +96,16 @@ const appRoute = createRoute({
 
 const fleetRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: FleetPage });
 
-const routeTree = rootRoute.addChildren([loginRoute, appRoute.addChildren([fleetRoute])]);
+const deviceRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/devices/$deviceId",
+  component: function Device() {
+    const { deviceId } = deviceRoute.useParams();
+    return <DeviceDetailPage deviceId={deviceId} />;
+  },
+});
+
+const routeTree = rootRoute.addChildren([loginRoute, appRoute.addChildren([fleetRoute, deviceRoute])]);
 
 export const router = createRouter({ routeTree, context: { queryClient } });
 

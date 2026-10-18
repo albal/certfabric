@@ -33,6 +33,7 @@ class FakeDevicePlugin(BaseDevicePlugin):
             raise PluginError("Device rejected the upload")
         if control.mode == "succeed":
             control.device.present(cert_pem, privkey_pem)
+            self.log("\x1b[32mupload complete\x1b[0m")
         return True
 
     async def post_deployment_verify(self, expected_fingerprint: str) -> bool:
