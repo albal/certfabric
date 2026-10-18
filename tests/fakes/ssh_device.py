@@ -6,6 +6,7 @@ were uploaded to /etc/tls/cert.pem and /etc/tls/key.pem.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import asyncssh
@@ -28,11 +29,19 @@ class _Server(asyncssh.SSHServer):
         return username == USERNAME and password == PASSWORD
 
 
+CommandHandler = Callable[[str], tuple[int, str]]
+
+
 class FakeSshDevice:
-    def __init__(self, root: Path) -> None:
+    """`command_handler(command) -> (exit_status, output)` replaces the default `reload-tls` handling."""
+
+    def __init__(
+        self, root: Path, tls: FakeTlsDevice | None = None, command_handler: CommandHandler | None = None
+    ) -> None:
         self.root = root
         (root / "etc" / "tls").mkdir(parents=True, exist_ok=True)
-        self.tls = FakeTlsDevice("linux.factory")
+        self.tls = tls or FakeTlsDevice("linux.factory")
+        self._command_handler = command_handler
         self.host = "127.0.0.1"
         self.ssh_port = 0
         self.host_key = asyncssh.generate_private_key("ssh-ed25519")
@@ -58,7 +67,11 @@ class FakeSshDevice:
 
     async def _handle_command(self, process: asyncssh.SSHServerProcess) -> None:
         self.commands.append(process.command or "")
-        if process.command == RELOAD_COMMAND:
+        if self._command_handler:
+            status, output = self._command_handler(process.command or "")
+            (process.stdout if status == 0 else process.stderr).write(output)
+            process.exit(status)
+        elif process.command == RELOAD_COMMAND:
             tls_dir = self.root / "etc" / "tls"
             self.tls.present((tls_dir / "cert.pem").read_text(), (tls_dir / "key.pem").read_text())
             process.stdout.write("tls reloaded\n")
