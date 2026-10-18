@@ -134,3 +134,17 @@ class Webhook(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     url: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+
+
+class AuditEvent(Base):
+    """Something the admin should see on the dashboard; the same event goes to webhooks."""
+
+    __tablename__ = "audit_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    timestamp: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, index=True)
+    level: Mapped[str] = mapped_column(String, nullable=False)  # info, warning or error
+    event: Mapped[str] = mapped_column(String, nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    device_id: Mapped[str | None] = mapped_column(ForeignKey("devices.id", ondelete="SET NULL"))
+    cert_id: Mapped[str | None] = mapped_column(ForeignKey("certificates.id", ondelete="SET NULL"))

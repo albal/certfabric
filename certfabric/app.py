@@ -14,6 +14,7 @@ from certfabric.api import auth as auth_api
 from certfabric.api import certificates as certificates_api
 from certfabric.api import devices as devices_api
 from certfabric.api import dns_providers as dns_providers_api
+from certfabric.api import events as events_api
 from certfabric.api import jobs as jobs_api
 from certfabric.api import plugins as plugins_api
 from certfabric.api import settings as settings_api
@@ -40,6 +41,7 @@ PROTECTED_ROUTERS: list[APIRouter] = [
     plugins_api.router,
     jobs_api.router,
     webhooks_api.router,
+    events_api.router,
 ]
 
 

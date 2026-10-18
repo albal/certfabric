@@ -1,16 +1,20 @@
-"""Generic JSON webhooks. Payloads are built from an allow-list of fields and never carry secrets."""
+"""Events: recorded for the dashboard and posted to every webhook as generic JSON.
+
+Payloads are built from an allow-list of fields and never carry secrets.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from typing import Any, Literal
 
 import httpx
 from sqlalchemy import select
 from starlette.datastructures import State
 
-from certfabric.models import Certificate, Device, Webhook
+from certfabric.models import AuditEvent, Certificate, Device, Webhook
 
 log = logging.getLogger(__name__)
 
@@ -22,6 +26,7 @@ EventType = Literal[
     "renewal_failed",
     "test",
 ]
+Level = Literal["info", "warning", "error"]
 DELIVERY_TIMEOUT_SECONDS = 10.0
 
 
@@ -58,16 +63,31 @@ class Notifier:
         *,
         device: Device | None = None,
         certificate: Certificate | None = None,
+        level: Level = "info",
     ) -> None:
-        """Queue delivery of an event to every webhook. Never raises, never waits for receivers."""
+        """Record the event and queue its delivery to every webhook. Never waits for receivers."""
+        now = self._state.clock.now()
         payload: dict[str, Any] = {
             "event": event,
-            "timestamp": self._state.clock.now().isoformat(),
+            "level": level,
+            "timestamp": now.isoformat(),
             "message": message,
             "device": device_summary(device) if device else None,
             "certificate": certificate_summary(certificate) if certificate else None,
         }
-        async with self._state.db.session() as db:
+        async with self._state.db.session() as db, db.begin():
+            if event != "test":
+                db.add(
+                    AuditEvent(
+                        id=uuid.uuid4().hex,
+                        timestamp=now,
+                        level=level,
+                        event=event,
+                        message=message,
+                        device_id=device.id if device else None,
+                        cert_id=certificate.id if certificate else None,
+                    )
+                )
             urls = list(await db.scalars(select(Webhook.url)))
         for url in urls:
             task = asyncio.create_task(self._deliver(url, payload))
