@@ -1,11 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useState, type ReactNode } from "react";
 
 import { api, type Certificate, type Deployment, type Device } from "../api";
 import { parseAnsi } from "../ansi";
 import { RedeployButton } from "../components/RedeployButton";
 import { StateBadge } from "../components/StateBadge";
+import { Button, ErrorText, errorMessage } from "../components/ui";
 import { formatDate } from "../format";
 
 const TRIGGERS: Record<string, string> = {
@@ -42,6 +43,50 @@ function Log({ text }: { text: string }) {
   );
 }
 
+function AssignCertificate({ device, certificates }: { device: Device; certificates: Certificate[] }) {
+  const [value, setValue] = useState(device.assigned_certificate_id ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const choices = certificates.filter((c) => c.status !== "SUPERSEDED" && c.status !== "REVOKED");
+
+  async function save() {
+    setError(null);
+    try {
+      await api.put(`/api/devices/${device.id}/certificate`, { certificate_id: value || null });
+      await queryClient.invalidateQueries();
+    } catch (exc) {
+      setError(errorMessage(exc));
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-end gap-2">
+      <label className="text-sm">
+        <span className="mb-1 block font-semibold">Managed Certificate</span>
+        <select
+          aria-label="Managed Certificate"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="border border-black px-3 py-1.5 text-sm"
+        >
+          <option value="">None (Monitor only)</option>
+          {choices.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.domain_primary} ({c.sans.join(", ")})
+            </option>
+          ))}
+        </select>
+      </label>
+      <Button variant="secondary" onClick={save}>
+        Assign
+      </Button>
+      <div className="basis-full">
+        <ErrorText error={error} />
+      </div>
+    </div>
+  );
+}
+
 export function DeviceDetailPage({ deviceId }: { deviceId: string }) {
   const device = useQuery({ queryKey: ["devices", deviceId], queryFn: () => api.get<Device>(`/api/devices/${deviceId}`), refetchInterval: 10_000 });
   const history = useQuery({
@@ -50,6 +95,8 @@ export function DeviceDetailPage({ deviceId }: { deviceId: string }) {
     refetchInterval: 10_000,
   });
   const certificates = useQuery({ queryKey: ["certificates"], queryFn: () => api.get<Certificate[]>("/api/certificates") });
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   if (!device.data) return <div className="p-6 text-slate-500">Loading…</div>;
   const d = device.data;
   const cert = certificates.data?.find((c) => c.id === d.assigned_certificate_id);
@@ -64,8 +111,26 @@ export function DeviceDetailPage({ deviceId }: { deviceId: string }) {
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <h1 className="text-xl font-bold text-slate-900">{d.name}</h1>
           <StateBadge state={d.state} />
-          <span className="ml-auto">
+          <span className="ml-auto flex gap-2">
             <RedeployButton device={d} />
+            <Link
+              to="/devices/$deviceId/edit"
+              params={{ deviceId: d.id }}
+              className="border border-black bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100"
+            >
+              Edit
+            </Link>
+            <Button
+              variant="danger"
+              onClick={async () => {
+                if (!window.confirm(`Delete ${d.name}? Its Deployment history is deleted too.`)) return;
+                await api.delete(`/api/devices/${d.id}`);
+                await queryClient.invalidateQueries();
+                await navigate({ to: "/" });
+              }}
+            >
+              Delete
+            </Button>
           </span>
         </div>
       </div>
@@ -86,6 +151,10 @@ export function DeviceDetailPage({ deviceId }: { deviceId: string }) {
           </Field>
           <Field label="Last probe error">{d.last_probe_error ?? "—"}</Field>
         </dl>
+      </section>
+
+      <section className="border border-black bg-white p-4">
+        <AssignCertificate key={d.assigned_certificate_id ?? "none"} device={d} certificates={certificates.data ?? []} />
       </section>
 
       <section className="border border-black bg-white p-4">

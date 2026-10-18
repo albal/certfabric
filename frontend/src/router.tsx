@@ -12,7 +12,12 @@ import {
 import { api, AuthRequired, type AuthStatus } from "./api";
 import { HealthRibbon } from "./components/HealthRibbon";
 import { TerminalProvider } from "./components/Terminal";
+import { CertificatesPage } from "./pages/Certificates";
 import { DeviceDetailPage } from "./pages/DeviceDetail";
+import { DeviceFormPage, EditDevicePage } from "./pages/DeviceForm";
+import { DnsProvidersPage } from "./pages/DnsProviders";
+import { SettingsPage } from "./pages/Settings";
+import { WebhooksPage } from "./pages/Webhooks";
 import { FleetPage } from "./pages/Fleet";
 import { LoginPage } from "./pages/Login";
 
@@ -41,7 +46,13 @@ const loginRoute = createRoute({
   },
 });
 
-const NAV = [{ to: "/", label: "Device Fleet" }] as const;
+const NAV = [
+  { to: "/", label: "Device Fleet" },
+  { to: "/certificates", label: "Certificates" },
+  { to: "/dns-providers", label: "DNS Providers" },
+  { to: "/webhooks", label: "Webhooks" },
+  { to: "/settings", label: "Settings" },
+] as const;
 
 function Shell() {
   const router = useRouter();
@@ -63,7 +74,8 @@ function Shell() {
                 key={item.to}
                 to={item.to}
                 className="rounded px-3 py-2 hover:bg-slate-800"
-                activeProps={{ className: "bg-slate-800 border-l-4 border-blue-600 font-semibold" }}
+                activeOptions={{ exact: item.to === "/" }}
+              activeProps={{ className: "bg-slate-800 border-l-4 border-blue-600 font-semibold" }}
               >
                 {item.label}
               </Link>
@@ -105,7 +117,32 @@ const deviceRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([loginRoute, appRoute.addChildren([fleetRoute, deviceRoute])]);
+const newDeviceRoute = createRoute({ getParentRoute: () => appRoute, path: "/devices/new", component: () => <DeviceFormPage /> });
+
+const editDeviceRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/devices/$deviceId/edit",
+  component: function EditDevice() {
+    const { deviceId } = editDeviceRoute.useParams();
+    return <EditDevicePage deviceId={deviceId} />;
+  },
+});
+
+const pageRoute = (path: string, component: () => JSX.Element) => createRoute({ getParentRoute: () => appRoute, path, component });
+
+const routeTree = rootRoute.addChildren([
+  loginRoute,
+  appRoute.addChildren([
+    fleetRoute,
+    newDeviceRoute,
+    deviceRoute,
+    editDeviceRoute,
+    pageRoute("/certificates", CertificatesPage),
+    pageRoute("/dns-providers", DnsProvidersPage),
+    pageRoute("/webhooks", WebhooksPage),
+    pageRoute("/settings", SettingsPage),
+  ]),
+]);
 
 export const router = createRouter({ routeTree, context: { queryClient } });
 
