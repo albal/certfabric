@@ -55,9 +55,12 @@ async def test_login_and_logout(client, anon):
     assert (await anon.get("/api/system/info")).status_code == 401
 
 
-async def test_session_expires(client, clock):
-    clock.advance(timedelta(days=8))
-    assert (await client.get("/api/system/info")).status_code == 401
+async def test_session_expires(client, anon, clock):
+    assert (await anon.post("/api/auth/login", json={"password": ADMIN_PASSWORD})).status_code == 204
+    clock.advance(timedelta(days=6))
+    assert (await anon.get("/api/system/info")).status_code == 200
+    clock.advance(timedelta(days=2))
+    assert (await anon.get("/api/system/info")).status_code == 401
 
 
 async def test_every_http_route_requires_a_session(app, anon):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Integer, String, TypeDecorator
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, TypeDecorator
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -44,6 +44,34 @@ class DnsProvider(Base):
     acme_dns_type: Mapped[str] = mapped_column(String, nullable=False)
     encrypted_credentials: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+
+
+class Certificate(Base):
+    __tablename__ = "certificates"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    domain_primary: Mapped[str] = mapped_column(String, nullable=False)
+    san_list: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    dns_provider_id: Mapped[str] = mapped_column(
+        ForeignKey("dns_providers.id", ondelete="RESTRICT"), nullable=False
+    )
+    key_type: Mapped[str] = mapped_column(String, nullable=False)
+    cert_pem: Mapped[str] = mapped_column(Text, nullable=False)
+    fullchain_pem: Mapped[str] = mapped_column(Text, nullable=False)
+    privkey_pem_encrypted: Mapped[str | None] = mapped_column(Text)
+    serial_number: Mapped[str] = mapped_column(String, nullable=False)
+    fingerprint_sha256: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    issued_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, index=True)
+    # VALID, REVOKED or SUPERSEDED. EXPIRING and EXPIRED are derived from expires_at.
+    status: Mapped[str] = mapped_column(String, nullable=False, default="VALID")
+
+
+class AppSetting(Base):
+    __tablename__ = "settings"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(String, nullable=False)
 
 
 class AuthSession(Base):
