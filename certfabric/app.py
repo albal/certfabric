@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, Depends, FastAPI
 
 from certfabric.api import auth as auth_api
+from certfabric.api import dns_providers as dns_providers_api
 from certfabric.api import system as system_api
 from certfabric.api.deps import require_session
 from certfabric.clock import Clock, SystemClock
@@ -18,7 +19,7 @@ from certfabric.scheduler import Scheduler
 from certfabric.vault import Vault
 
 # Routers in this list are reachable only with a valid admin session.
-PROTECTED_ROUTERS: list[APIRouter] = [system_api.router]
+PROTECTED_ROUTERS: list[APIRouter] = [system_api.router, dns_providers_api.router]
 
 
 def create_app(settings: Settings, clock: Clock | None = None) -> FastAPI:

@@ -36,6 +36,16 @@ class AdminUser(Base):
     password_hash: Mapped[str] = mapped_column(String, nullable=False)
 
 
+class DnsProvider(Base):
+    __tablename__ = "dns_providers"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    acme_dns_type: Mapped[str] = mapped_column(String, nullable=False)
+    encrypted_credentials: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+
+
 class AuthSession(Base):
     __tablename__ = "sessions"
 
