@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from certfabric import devices
 from certfabric.api.deps import get_db
 from certfabric.certificates import covers
-from certfabric.deployments import DeploymentInProgress, DeploymentRefused
+from certfabric.deployments import DeploymentInProgress, DeploymentRefused, reset_failures
 from certfabric.models import Certificate, DeploymentLog, Device
 from certfabric.plugins.base import DeviceCredentials
 from certfabric.probe import probe
@@ -118,6 +118,8 @@ class DeviceOut(BaseModel):
     state: str = Field(description="UNREACHABLE, MONITOR_ONLY when no Certificate is assigned, otherwise the classification")
     presented_certificate: PresentedCertificate | None
     consecutive_probe_failures: int
+    consecutive_deploy_failures: int
+    next_retry_at: datetime | None
     last_probe_error: str | None
     last_scanned_at: datetime | None
     created_at: datetime
@@ -195,6 +197,8 @@ def device_out(device: Device, vault: Vault) -> DeviceOut:
         state=_state(device),
         presented_certificate=presented,
         consecutive_probe_failures=device.consecutive_probe_failures,
+        consecutive_deploy_failures=device.consecutive_deploy_failures,
+        next_retry_at=device.next_retry_at,
         last_probe_error=device.last_probe_error,
         last_scanned_at=device.last_scanned_at,
         created_at=device.created_at,
@@ -323,6 +327,7 @@ async def update_device(
         setattr(device, field, value)
     if body.credentials is not None:
         device.encrypted_credentials = vault.encrypt_json(body.credentials.model_dump())
+        reset_failures(device)  # New credentials are worth trying again.
     if {"hostname", "sni"} & changes.keys():
         await _check_assignment(db, device, device.assigned_cert_id)
     await db.flush()

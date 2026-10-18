@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 import time
 import uuid
+from datetime import datetime, timedelta
 from typing import Any
+
+from sqlalchemy import select
 
 from starlette.datastructures import State
 
@@ -14,6 +18,21 @@ from certfabric.models import Certificate, DeploymentLog, Device
 from certfabric.plugins.base import DeviceCredentials, PluginError
 from certfabric.redaction import Redactor
 from certfabric.x509util import build_pkcs12, info_from_pem, split_pem_chain
+
+
+log = logging.getLogger(__name__)
+
+# Wait before each automatic retry after a failure; the last value repeats (the cap).
+RETRY_BACKOFF = (timedelta(hours=1), timedelta(hours=6), timedelta(hours=24))
+DEPLOY_FAILED_AFTER = 3
+RETRY_SWEEP_INTERVAL = timedelta(minutes=1)
+
+
+def auto_deploy_blocked(device: Device, now: datetime) -> bool:
+    """Automatic Deployments wait out the backoff, and stop entirely once Deploy Failed."""
+    if device.consecutive_deploy_failures >= DEPLOY_FAILED_AFTER:
+        return True
+    return device.next_retry_at is not None and now < device.next_retry_at
 
 
 class DeploymentRefused(Exception):
@@ -48,6 +67,8 @@ class Deployer:
                     raise DeploymentRefused("Device is Monitor-only: assign a Certificate first")
                 if self._state.plugins.get(device.plugin_id) is None:
                     raise DeploymentRefused(f"Plugin {device.plugin_id!r} is not installed")
+            if trigger_source == "MANUAL":
+                await self._reset_failures(device_id)
         except BaseException:
             self._running.discard(device_id)
             raise
@@ -59,6 +80,34 @@ class Deployer:
                 self._running.discard(device_id)
 
         return self._state.jobs.start("deployment", run)
+
+    async def _reset_failures(self, device_id: str) -> None:
+        """Someone intervened: forget past failures so automatic healing can resume."""
+        async with self._state.db.session() as db, db.begin():
+            device = await db.get(Device, device_id)
+            if device is not None:
+                reset_failures(device)
+
+    async def retry_due(self) -> None:
+        """Retry Devices whose backoff has elapsed (scheduled job)."""
+        now = self._state.clock.now()
+        async with self._state.db.session() as db:
+            due = list(
+                await db.scalars(
+                    select(Device.id).where(
+                        Device.next_retry_at.is_not(None),
+                        Device.next_retry_at <= now,
+                        Device.consecutive_deploy_failures < DEPLOY_FAILED_AFTER,
+                        Device.assigned_cert_id.is_not(None),
+                    )
+                )
+            )
+        for device_id in due:
+            if not self.is_running(device_id):
+                try:
+                    await self.start(device_id, "RETRY")
+                except DeploymentRefused as exc:
+                    log.info("Not retrying %s: %s", device_id, exc)
 
     async def _deploy(self, job: Job, device_id: str, trigger_source: str) -> dict[str, Any]:
         state = self._state
@@ -128,6 +177,7 @@ class Deployer:
             device = await db.get(Device, device_id)
             if device is None:
                 return
+            gave_up = False
             if error is None:
                 # Verification just saw the Device serve this Certificate.
                 info = info_from_pem(cert.cert_pem)
@@ -142,3 +192,26 @@ class Deployer:
                 device.presented_expires_at = info.not_after
             else:
                 device.consecutive_deploy_failures += 1
+                if device.consecutive_deploy_failures >= DEPLOY_FAILED_AFTER:
+                    device.drift_status = "DEPLOY_FAILED"
+                    device.next_retry_at = None
+                    gave_up = True
+                else:
+                    wait = RETRY_BACKOFF[min(device.consecutive_deploy_failures, len(RETRY_BACKOFF)) - 1]
+                    device.next_retry_at = now + wait
+        if gave_up:
+            await state.notifier.emit(
+                "deploy_failed",
+                f"{device.name}: {DEPLOY_FAILED_AFTER} Deployments failed in a row ({error}); "
+                "automatic retries stopped until you redeploy or fix its credentials",
+                device=device,
+                certificate=cert,
+                level="error",
+            )
+
+
+def reset_failures(device: Device) -> None:
+    device.consecutive_deploy_failures = 0
+    device.next_retry_at = None
+    if device.drift_status == "DEPLOY_FAILED":
+        device.drift_status = "UNKNOWN"

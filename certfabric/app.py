@@ -24,7 +24,7 @@ from certfabric.api.deps import require_session
 from certfabric.clock import Clock, SystemClock
 from certfabric.config import Settings, load_settings
 from certfabric.db import Database, migrate
-from certfabric.deployments import Deployer
+from certfabric.deployments import RETRY_SWEEP_INTERVAL, Deployer
 from certfabric.jobs import JobRegistry
 from certfabric.notifier import Notifier
 from certfabric.plugins.registry import BUILTIN_DIR, PluginRegistry
@@ -76,6 +76,7 @@ def create_app(settings: Settings, clock: Clock | None = None) -> FastAPI:
     app.state.plugins = PluginRegistry([BUILTIN_DIR, *settings.plugin_dirs])
     app.state.deployer = Deployer(app.state)
     app.state.notifier = Notifier(app.state)
+    app.state.scheduler.add_job("deploy-retry", RETRY_SWEEP_INTERVAL, app.state.deployer.retry_due)
     app.state.scheduler.add_job("probe-sweep", devices.SWEEP_INTERVAL, lambda: devices.sweep(app.state))
 
     app.include_router(auth_api.router)
