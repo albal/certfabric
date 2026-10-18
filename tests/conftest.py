@@ -18,6 +18,7 @@ from certfabric.scheduler import Scheduler
 from tests.fakes import fake_device_control
 from tests.fakes.acme_harness import FakeAcme
 from tests.fakes.tls_device import FakeTlsDevice
+from tests.fakes.webhook_receiver import WebhookReceiver
 
 ADMIN_PASSWORD = "correct horse battery staple"
 TEST_PLUGINS = Path(__file__).parent / "fakes" / "plugins"
@@ -59,6 +60,16 @@ async def tls_device() -> AsyncIterator[FakeTlsDevice]:
     fake_device_control.register(device)
     yield device
     await device.stop()
+
+
+@pytest.fixture
+async def webhooks(client: httpx.AsyncClient) -> AsyncIterator[WebhookReceiver]:
+    """A recording webhook receiver, registered with CertFabric."""
+    receiver = await WebhookReceiver().start()
+    response = await client.post("/api/webhooks", json={"url": receiver.url})
+    assert response.status_code == 201
+    yield receiver
+    await receiver.stop()
 
 
 @pytest.fixture

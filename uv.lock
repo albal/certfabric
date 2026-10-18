@@ -79,6 +79,7 @@ dependencies = [
     { name = "asyncssh" },
     { name = "cryptography" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -97,6 +98,7 @@ requires-dist = [
     { name = "asyncssh", specifier = ">=2.24.1" },
     { name = "cryptography", specifier = ">=43" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]

@@ -18,12 +18,14 @@ from certfabric.api import jobs as jobs_api
 from certfabric.api import plugins as plugins_api
 from certfabric.api import settings as settings_api
 from certfabric.api import system as system_api
+from certfabric.api import webhooks as webhooks_api
 from certfabric.api.deps import require_session
 from certfabric.clock import Clock, SystemClock
 from certfabric.config import Settings, load_settings
 from certfabric.db import Database, migrate
 from certfabric.deployments import Deployer
 from certfabric.jobs import JobRegistry
+from certfabric.notifier import Notifier
 from certfabric.plugins.registry import BUILTIN_DIR, PluginRegistry
 from certfabric.scheduler import Scheduler
 from certfabric.vault import Vault
@@ -37,6 +39,7 @@ PROTECTED_ROUTERS: list[APIRouter] = [
     devices_api.router,
     plugins_api.router,
     jobs_api.router,
+    webhooks_api.router,
 ]
 
 
@@ -58,6 +61,7 @@ def create_app(settings: Settings, clock: Clock | None = None) -> FastAPI:
                 with contextlib.suppress(asyncio.CancelledError):
                     await loop_task
             await app.state.jobs.shutdown()
+            await app.state.notifier.drain()
             await app.state.db.dispose()
 
     app = FastAPI(title="CertFabric", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -69,6 +73,7 @@ def create_app(settings: Settings, clock: Clock | None = None) -> FastAPI:
     app.state.acme = AcmeRunner(settings.acme_sh)
     app.state.plugins = PluginRegistry([BUILTIN_DIR, *settings.plugin_dirs])
     app.state.deployer = Deployer(app.state)
+    app.state.notifier = Notifier(app.state)
     app.state.scheduler.add_job("probe-sweep", devices.SWEEP_INTERVAL, lambda: devices.sweep(app.state))
 
     app.include_router(auth_api.router)
