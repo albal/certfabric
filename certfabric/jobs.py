@@ -102,6 +102,11 @@ class JobRegistry:
     def get(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)
 
+    async def idle(self) -> None:
+        """Wait until no job is running, including jobs started by jobs."""
+        while self._tasks:
+            await asyncio.gather(*list(self._tasks), return_exceptions=True)
+
     async def shutdown(self) -> None:
         for task in list(self._tasks):
             task.cancel()

@@ -164,3 +164,9 @@ async def deploy(client: httpx.AsyncClient, device_id: str) -> dict:
     response = await client.post(f"/api/devices/{device_id}/deploy")
     assert response.status_code == 202, response.text
     return await wait_for_job(client, response.json()["job_id"])
+
+
+async def settle(app: FastAPI) -> None:
+    """Wait for background work (Deployments and their follow-ups, webhook deliveries) to finish."""
+    await app.state.jobs.idle()
+    await app.state.notifier.drain()
