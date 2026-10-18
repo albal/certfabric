@@ -43,6 +43,10 @@ class CertificateOut(BaseModel):
     issued_at: datetime
     expires_at: datetime
     status: str
+    superseded_by: str | None
+    has_private_key: bool
+    renewal_attempted_at: datetime | None
+    renewal_error: str | None
 
 
 def _out(cert: Certificate, now: datetime, threshold_days: int) -> CertificateOut:
@@ -57,6 +61,10 @@ def _out(cert: Certificate, now: datetime, threshold_days: int) -> CertificateOu
         issued_at=cert.issued_at,
         expires_at=cert.expires_at,
         status=certificates.derived_status(cert, now, threshold_days),
+        superseded_by=cert.superseded_by,
+        has_private_key=cert.privkey_pem_encrypted is not None,
+        renewal_attempted_at=cert.renewal_attempted_at,
+        renewal_error=cert.renewal_error,
     )
 
 

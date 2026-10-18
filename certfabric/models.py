@@ -66,6 +66,10 @@ class Certificate(Base):
     expires_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, index=True)
     # VALID, REVOKED or SUPERSEDED. EXPIRING and EXPIRED are derived from expires_at.
     status: Mapped[str] = mapped_column(String, nullable=False, default="VALID")
+    superseded_by: Mapped[str | None] = mapped_column(String)
+    superseded_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    renewal_attempted_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    renewal_error: Mapped[str | None] = mapped_column(Text)
 
 
 class Device(Base):
