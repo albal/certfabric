@@ -11,18 +11,30 @@ from pathlib import Path
 from tests.fakes.certs import self_signed
 
 
+# What old embedded web servers offer: TLS 1.2 at most, RSA key exchange, SHA-1 MACs.
+LEGACY_CIPHERS = "AES256-SHA:AES128-SHA:@SECLEVEL=0"
+
+
 class FakeTlsDevice:
-    def __init__(self, common_name: str = "factory.local") -> None:
+    def __init__(self, common_name: str = "factory.local", *, legacy_tls: bool = False) -> None:
+        self.legacy_tls = legacy_tls
         self.host = "127.0.0.1"
         self.port = 0
         # Each certificate gets its own context, swapped in per handshake: loading a second
         # chain into one context keeps both (one per key type) and OpenSSL may pick the old one.
         self._current: ssl.SSLContext | None = None
-        self._context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        self._context = self._server_context()
         self._context.sni_callback = self._select_context
         self._server: asyncio.Server | None = None
         self.cert_pem, self.key_pem = "", ""
-        self.present(*self_signed(common_name, datetime.now(UTC)))
+        self.present(*self_signed(common_name, datetime.now(UTC), rsa_key=legacy_tls))
+
+    def _server_context(self) -> ssl.SSLContext:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        if self.legacy_tls:
+            context.maximum_version = ssl.TLSVersion.TLSv1_2
+            context.set_ciphers(LEGACY_CIPHERS)
+        return context
 
     def present(self, cert_pem: str, key_pem: str) -> None:
         """Serve this certificate to every new connection."""
@@ -31,7 +43,7 @@ class FakeTlsDevice:
             chain, key = Path(tmp, "chain.pem"), Path(tmp, "key.pem")
             chain.write_text(cert_pem)
             key.write_text(key_pem)
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context = self._server_context()
             context.load_cert_chain(chain, key)
             if self._current is None:
                 self._context.load_cert_chain(chain, key)

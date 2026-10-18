@@ -3,6 +3,7 @@ import pytest
 from certfabric.plugins.base import DeviceCredentials, PluginError
 from certfabric.plugins.contract import PluginContract, make_certificate
 from certfabric.plugins.hp_pro_ews.plugin import HpProEwsPlugin
+from certfabric.probe import probe
 from certfabric.x509util import build_pkcs12, split_pem_chain
 from tests.fakes import hp_printer
 from tests.fakes.certs import fingerprint
@@ -109,3 +110,20 @@ async def test_end_to_end_through_the_engine(client, simulator):
     assert job["state"] == "succeeded", job
     assert fingerprint(simulator.https.cert_pem) == cert["fingerprint_sha256"]
     assert hp_printer.PASSWORD not in job["output"]
+
+
+async def test_works_with_firmware_that_only_speaks_legacy_tls(make_plugin, good_credentials):
+    """Regression: the M283fdw offers only TLS 1.2 RSA/SHA-1 suites, which Python's defaults refuse."""
+    printer = await FakeHpPrinter(legacy_tls=True).start()
+    try:
+        plugin = HpProEwsPlugin(
+            printer.host, printer.port, good_credentials, options={"cycle_wait": 0, "verify_timeout": 1}, log=print
+        )
+        result = await plugin.test_connection()
+        assert result.success, result.message
+        assert (await probe(printer.host, printer.port)).ok  # the Probe already coped
+        cert = make_certificate("printer.lan.example.com")
+        assert await plugin.deploy_certificate(cert.cert_pem, cert.key_pem, cert.fullchain_pem, cert.pkcs12("pw"), "pw")
+        assert await plugin.post_deployment_verify(cert.fingerprint_sha256)
+    finally:
+        await printer.stop()

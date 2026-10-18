@@ -13,7 +13,8 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
-from certfabric.probe import probe
+# device_tls_context is re-exported for Plugins: pass it as httpx's `verify=` when talking to a Device.
+from certfabric.probe import device_tls_context, probe  # noqa: F401
 
 TARGET_CATEGORIES = ("printer", "bmc", "hypervisor", "network", "generic")
 
@@ -30,6 +31,11 @@ class DeviceCredentials(BaseModel):
     def secrets(self) -> list[str]:
         values = [self.password, self.api_token, self.pfx_passphrase, *self.extra.values()]
         return [v for v in values if v]
+
+
+def describe(exc: BaseException) -> str:
+    """An exception as a message for the admin, even when it has no text of its own."""
+    return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
 
 
 class PluginValidationResult(BaseModel):

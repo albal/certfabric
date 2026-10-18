@@ -18,7 +18,13 @@ import base64
 
 import httpx
 
-from certfabric.plugins.base import BaseDevicePlugin, PluginError, PluginValidationResult
+from certfabric.plugins.base import (
+    BaseDevicePlugin,
+    PluginError,
+    PluginValidationResult,
+    describe,
+    device_tls_context,
+)
 
 TIMEOUT_SECONDS = 60
 
@@ -41,7 +47,7 @@ class DellIdracRedfishPlugin(BaseDevicePlugin):
         return httpx.AsyncClient(
             base_url=f"https://{self.host}:{self.port}",
             auth=(creds.username, creds.password),
-            verify=False,
+            verify=device_tls_context(),
             timeout=TIMEOUT_SECONDS,
             headers={"Accept": "application/json"},
         )
@@ -67,7 +73,7 @@ class DellIdracRedfishPlugin(BaseDevicePlugin):
         except PluginError as exc:
             return PluginValidationResult(success=False, message=str(exc))
         except httpx.HTTPError as exc:
-            return PluginValidationResult(success=False, message=f"iDRAC unreachable: {exc}")
+            return PluginValidationResult(success=False, message=f"iDRAC unreachable: {describe(exc)}")
         model = manager.get("Model", "iDRAC")
         firmware = manager.get("FirmwareVersion", "unknown")
         return PluginValidationResult(
@@ -98,7 +104,7 @@ class DellIdracRedfishPlugin(BaseDevicePlugin):
                     )
                     self._check(response, "iDRAC restart")
         except httpx.HTTPError as exc:
-            raise PluginError(f"iDRAC unreachable: {exc}") from None
+            raise PluginError(f"iDRAC unreachable: {describe(exc)}") from None
         return True
 
     async def post_deployment_verify(self, expected_fingerprint: str) -> bool:

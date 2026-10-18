@@ -27,7 +27,13 @@ class ProbeResult:
         return self.presented is not None
 
 
-def _context() -> ssl.SSLContext:
+def device_tls_context() -> ssl.SSLContext:
+    """A client context for talking to Devices: no verification, legacy protocols and ciphers allowed.
+
+    Verification is pointless (the Device's current certificate is the one being replaced or
+    observed) and old firmware often speaks only TLS 1.0/1.1 or RSA/SHA-1 suites that Python's
+    defaults refuse.
+    """
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
@@ -45,7 +51,7 @@ async def probe(host: str, port: int, sni: str | None = None, timeout: float = P
     try:
         async with asyncio.timeout(timeout):
             _reader, writer = await asyncio.open_connection(
-                host, port, ssl=_context(), server_hostname=sni or host
+                host, port, ssl=device_tls_context(), server_hostname=sni or host
             )
             try:
                 der = writer.get_extra_info("ssl_object").getpeercert(binary_form=True)
