@@ -18,7 +18,8 @@ def all_routes(routes, prefix=""):
             yield prefix, route
 
 
-PUBLIC_PATHS = {"/api/auth/status", "/api/auth/setup", "/api/auth/login", "/api/auth/logout"}
+# The SPA shell is public; every API and WebSocket route behind it is not.
+PUBLIC_PATHS = {"/api/auth/status", "/api/auth/setup", "/api/auth/login", "/api/auth/logout", "/{path:path}"}
 
 
 async def test_first_run_requires_setup(anon):
