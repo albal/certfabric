@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import State
 
-from certfabric.deployments import DeploymentRefused
+from certfabric.deployments import DEPLOY_FAILED_AFTER, DeploymentRefused, auto_deploy_blocked
 from certfabric.models import Certificate, DeploymentLog, Device
 from certfabric.notifier import EventType, Level
 from certfabric.probe import ProbeResult, probe
@@ -102,6 +102,12 @@ async def apply_probe(db: AsyncSession, device: Device, result: ProbeResult, sta
         return FollowUp(device=device, notices=notices) if notices else None
     previous = device.drift_status
     device.drift_status = await classify(db, device, assigned)
+    if device.drift_status == "IN_SYNC":
+        device.consecutive_deploy_failures = 0  # Healthy again, however it got there.
+        device.next_retry_at = None
+    elif device.consecutive_deploy_failures >= DEPLOY_FAILED_AFTER:
+        device.drift_status = "DEPLOY_FAILED"  # Stays put until someone intervenes.
+        return FollowUp(device=device, notices=notices) if notices else None
     if device.drift_status == "DRIFT_DETECTED" and previous != "DRIFT_DETECTED":
         notices.append(
             Notice(
@@ -114,6 +120,8 @@ async def apply_probe(db: AsyncSession, device: Device, result: ProbeResult, sta
     trigger = {"DRIFT_DETECTED": "DRIFT_HEAL", "OUTDATED": "OUTDATED_HEAL", "UNKNOWN": "INITIAL_SETUP"}.get(
         device.drift_status
     )
+    if trigger and auto_deploy_blocked(device, state.clock.now()):
+        trigger = None  # Backing off after a failure; the retry job picks it up.
     if trigger is None and not notices:
         return None
     return FollowUp(device=device, certificate=assigned, heal_trigger=trigger, notices=notices)
