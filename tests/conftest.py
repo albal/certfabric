@@ -15,6 +15,7 @@ from certfabric.clock import FakeClock
 from certfabric.config import Settings
 from certfabric.scheduler import Scheduler
 from tests.fakes.acme_harness import FakeAcme
+from tests.fakes.tls_device import FakeTlsDevice
 
 ADMIN_PASSWORD = "correct horse battery staple"
 BASE_URL = "http://certfabric.test"
@@ -45,6 +46,14 @@ async def app(settings: Settings, clock: FakeClock) -> AsyncIterator[FastAPI]:
     app = create_app(settings, clock)
     async with app.router.lifespan_context(app):
         yield app
+
+
+@pytest.fixture
+async def tls_device() -> AsyncIterator[FakeTlsDevice]:
+    """A running fake Device presenting a factory self-signed certificate."""
+    device = await FakeTlsDevice().start()
+    yield device
+    await device.stop()
 
 
 @pytest.fixture
@@ -111,3 +120,16 @@ async def issue_certificate(client: httpx.AsyncClient, domains: list[str], **ext
     job = await wait_for_job(client, response.json()["job_id"])
     assert job["state"] == "succeeded", job
     return (await client.get(f"/api/certificates/{job['result']['certificate_id']}")).json()
+
+
+async def create_device(client: httpx.AsyncClient, tls_device: FakeTlsDevice, **extra) -> dict:
+    body = {
+        "name": "Printer",
+        "hostname": tls_device.host,
+        "port": tls_device.port,
+        "plugin_id": "generic_ssh_hook",
+        **extra,
+    }
+    response = await client.post("/api/devices", json=body)
+    assert response.status_code == 201, response.text
+    return response.json()
