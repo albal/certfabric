@@ -132,3 +132,13 @@ export type AuditEvent = {
   device_id: string | null;
   certificate_id: string | null;
 };
+
+export type Deployment = {
+  id: string;
+  certificate_id: string;
+  trigger_source: string;
+  success: boolean;
+  execution_time_ms: number;
+  log_output: string | null;
+  timestamp: string;
+};
