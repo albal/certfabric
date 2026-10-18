@@ -28,6 +28,7 @@ from certfabric.deployments import RETRY_SWEEP_INTERVAL, Deployer
 from certfabric.jobs import JobRegistry
 from certfabric.notifier import Notifier
 from certfabric.plugins.registry import BUILTIN_DIR, PluginRegistry
+from certfabric.renewal import RENEWAL_CHECK_INTERVAL, Renewer
 from certfabric.scheduler import Scheduler
 from certfabric.vault import Vault
 
@@ -77,6 +78,8 @@ def create_app(settings: Settings, clock: Clock | None = None) -> FastAPI:
     app.state.deployer = Deployer(app.state)
     app.state.notifier = Notifier(app.state)
     app.state.scheduler.add_job("deploy-retry", RETRY_SWEEP_INTERVAL, app.state.deployer.retry_due)
+    app.state.renewer = Renewer(app.state)
+    app.state.scheduler.add_job("renewal-check", RENEWAL_CHECK_INTERVAL, app.state.renewer.check, run_immediately=True)
     app.state.scheduler.add_job("probe-sweep", devices.SWEEP_INTERVAL, lambda: devices.sweep(app.state))
 
     app.include_router(auth_api.router)

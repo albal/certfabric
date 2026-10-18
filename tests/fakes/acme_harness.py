@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 import sys
 from pathlib import Path
@@ -36,7 +37,10 @@ class FakeAcme:
 
     def _write(self) -> None:
         self._control["now"] = self._clock.now().isoformat()
-        self._control_path.write_text(json.dumps(self._control))
+        # Atomic, because a running fake may read the file while the clock moves.
+        tmp = self._control_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self._control))
+        os.replace(tmp, self._control_path)
 
     @property
     def invocations(self) -> list[dict[str, Any]]:

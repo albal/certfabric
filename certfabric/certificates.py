@@ -40,6 +40,17 @@ async def issue(
     state: State, job: Job, *, domains: list[str], dns_provider_id: str, key_type: KeyType
 ) -> dict[str, Any]:
     """Job body: run acme.sh, then store the Certificate. Nothing is stored if any step fails."""
+    certificate = await obtain(state, job, domains=domains, dns_provider_id=dns_provider_id, key_type=key_type)
+    async with state.db.session() as db, db.begin():
+        db.add(certificate)
+    job.write(f"Stored Certificate {certificate.id}, expires {certificate.expires_at:%Y-%m-%d}")
+    return {"certificate_id": certificate.id}
+
+
+async def obtain(
+    state: State, job: Job, *, domains: list[str], dns_provider_id: str, key_type: KeyType
+) -> Certificate:
+    """Run acme.sh and return the new Certificate, not yet stored. Raises JobFailed."""
     async with state.db.session() as db:
         provider = await db.get(DnsProvider, dns_provider_id)
         if provider is None:
@@ -80,7 +91,4 @@ async def issue(
         expires_at=info.not_after,
         status="VALID",
     )
-    async with state.db.session() as db, db.begin():
-        db.add(certificate)
-    job.write(f"Stored Certificate {certificate.id}, expires {info.not_after:%Y-%m-%d}")
-    return {"certificate_id": certificate.id}
+    return certificate

@@ -75,11 +75,25 @@ class Deployer:
 
         async def run(job: Job) -> dict[str, Any]:
             try:
-                return await self._deploy(job, device_id, trigger_source)
+                result = await self._deploy(job, device_id, trigger_source)
             finally:
                 self._running.discard(device_id)
+            await self._catch_up(job, device_id, result["certificate_id"])
+            return result
 
         return self._state.jobs.start("deployment", run)
+
+    async def _catch_up(self, job: Job, device_id: str, deployed_cert_id: str) -> None:
+        """If a renewal reassigned the Device while this Deployment ran, deploy the new one too."""
+        async with self._state.db.session() as db:
+            device = await db.get(Device, device_id)
+        if device is None or device.assigned_cert_id in (None, deployed_cert_id):
+            return
+        job.write("The assigned Certificate changed during this Deployment; deploying the new one")
+        try:
+            await self.start(device_id, "RENEWAL")
+        except DeploymentRefused as exc:
+            log.info("Could not catch up %s: %s", device_id, exc)
 
     async def _reset_failures(self, device_id: str) -> None:
         """Someone intervened: forget past failures so automatic healing can resume."""
