@@ -48,7 +48,7 @@ Available on `self`:
 
 Guidelines:
 
-- The Device's current certificate is the one you are replacing, so its TLS cannot be verified: connect with verification off.
+- Talk to the Device with `verify=device_tls_context()` (from `certfabric.plugins.base`). The Device's current certificate is the one you are replacing, so it cannot be verified, and old firmware often only speaks TLS 1.0/1.1 or RSA/SHA-1 cipher suites that Python's defaults refuse. `verify=False` is not enough: it skips verification but keeps the modern protocol and cipher restrictions.
 - Devices often restart their web server after an upload; poll in `post_deployment_verify` with a timeout taken from `options`.
 - Raise `PluginError("message for the admin")` for expected failures. Anything else is reported as a Plugin crash.
 - `pfx_bundle` is protected by `pfx_password`, a fresh passphrase for each Deployment unless the Device has a fixed one.

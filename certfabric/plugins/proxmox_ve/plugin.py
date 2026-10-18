@@ -25,7 +25,13 @@ from typing import Any
 import asyncssh
 import httpx
 
-from certfabric.plugins.base import BaseDevicePlugin, PluginError, PluginValidationResult
+from certfabric.plugins.base import (
+    BaseDevicePlugin,
+    PluginError,
+    PluginValidationResult,
+    describe,
+    device_tls_context,
+)
 
 TIMEOUT_SECONDS = 30
 
@@ -41,7 +47,9 @@ class ProxmoxVePlugin(BaseDevicePlugin):
     def _client(self) -> httpx.AsyncClient:
         # The device's current certificate is the one being replaced, so it cannot be trusted.
         return httpx.AsyncClient(
-            base_url=f"https://{self.host}:{self.port}/api2/json", verify=False, timeout=TIMEOUT_SECONDS
+            base_url=f"https://{self.host}:{self.port}/api2/json",
+            verify=device_tls_context(),
+            timeout=TIMEOUT_SECONDS,
         )
 
     async def _login(self, client: httpx.AsyncClient) -> None:
@@ -85,7 +93,7 @@ class ProxmoxVePlugin(BaseDevicePlugin):
         except PluginError as exc:
             return PluginValidationResult(success=False, message=str(exc))
         except httpx.HTTPError as exc:
-            return PluginValidationResult(success=False, message=f"Proxmox API unreachable: {exc}")
+            return PluginValidationResult(success=False, message=f"Proxmox API unreachable: {describe(exc)}")
         return PluginValidationResult(
             success=True, message=f"Proxmox VE {version}, node {node}", details={"version": version, "node": node}
         )
@@ -160,7 +168,7 @@ class ProxmoxVePlugin(BaseDevicePlugin):
             self.log(f"Proxmox API unreachable ({type(exc).__name__}); falling back to SSH")
             await self._deploy_ssh(fullchain_pem, privkey_pem)
         except httpx.HTTPError as exc:
-            raise PluginError(f"Proxmox API error: {exc}") from None
+            raise PluginError(f"Proxmox API error: {describe(exc)}") from None
         return True
 
     async def post_deployment_verify(self, expected_fingerprint: str) -> bool:

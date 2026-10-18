@@ -24,8 +24,8 @@ def _error(status: int, message: str) -> Response:
 
 
 class FakeIdrac:
-    def __init__(self) -> None:
-        self.https = FakeHttpsDevice(self._handle, "idrac.factory")
+    def __init__(self, *, legacy_tls: bool = False) -> None:
+        self.https = FakeHttpsDevice(self._handle, "idrac.factory", legacy_tls=legacy_tls)
         self.pending: tuple[str, str] | None = None
         self.resets = 0
 

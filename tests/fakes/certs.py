@@ -6,13 +6,13 @@ from datetime import datetime, timedelta
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import NameOID
 
 
-def self_signed(common_name: str, now: datetime, days: int = 3650) -> tuple[str, str]:
+def self_signed(common_name: str, now: datetime, days: int = 3650, *, rsa_key: bool = False) -> tuple[str, str]:
     """A factory-style self-signed certificate and key, as PEM."""
-    key = ec.generate_private_key(ec.SECP256R1())
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048) if rsa_key else ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
     cert = (
         x509.CertificateBuilder()

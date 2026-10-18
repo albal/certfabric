@@ -22,7 +22,13 @@ import re
 
 import httpx
 
-from certfabric.plugins.base import BaseDevicePlugin, PluginError, PluginValidationResult
+from certfabric.plugins.base import (
+    BaseDevicePlugin,
+    PluginError,
+    PluginValidationResult,
+    describe,
+    device_tls_context,
+)
 
 TIMEOUT_SECONDS = 30
 CERTIFICATES_PAGE = "/Security/Certificates"
@@ -41,7 +47,10 @@ class HpProEwsPlugin(BaseDevicePlugin):
         auth = (creds.username or "admin", creds.password) if creds.password else None
         # The printer's current certificate is the one being replaced, so it cannot be trusted.
         return httpx.AsyncClient(
-            base_url=f"https://{self.host}:{self.port}", auth=auth, verify=False, timeout=TIMEOUT_SECONDS
+            base_url=f"https://{self.host}:{self.port}",
+            auth=auth,
+            verify=device_tls_context(),
+            timeout=TIMEOUT_SECONDS,
         )
 
     def _csrf_token(self, html: str) -> str:
@@ -69,7 +78,7 @@ class HpProEwsPlugin(BaseDevicePlugin):
         except PluginError as exc:
             return PluginValidationResult(success=False, message=str(exc))
         except httpx.HTTPError as exc:
-            return PluginValidationResult(success=False, message=f"Printer unreachable: {exc}")
+            return PluginValidationResult(success=False, message=f"Printer unreachable: {describe(exc)}")
         return PluginValidationResult(success=True, message="Signed in to the printer's certificate page")
 
     async def deploy_certificate(
@@ -96,7 +105,7 @@ class HpProEwsPlugin(BaseDevicePlugin):
                     },
                 )
         except httpx.HTTPError as exc:
-            raise PluginError(f"Printer unreachable: {exc}") from None
+            raise PluginError(f"Printer unreachable: {describe(exc)}") from None
         if response.status_code == 401:
             raise PluginError("The printer rejected the admin password")
         if response.status_code >= 400:

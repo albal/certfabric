@@ -69,8 +69,8 @@ Handler = Callable[[Request], Awaitable[Response]]
 
 
 class FakeHttpsDevice(FakeTlsDevice):
-    def __init__(self, handler: Handler, common_name: str = "device.factory") -> None:
-        super().__init__(common_name)
+    def __init__(self, handler: Handler, common_name: str = "device.factory", *, legacy_tls: bool = False) -> None:
+        super().__init__(common_name, legacy_tls=legacy_tls)
         self.handler = handler
         self.requests: list[Request] = []
 

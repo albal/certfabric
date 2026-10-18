@@ -14,8 +14,8 @@ PASSWORD = "printer-admin-pass-42"
 
 
 class FakeHpPrinter:
-    def __init__(self) -> None:
-        self.https = FakeHttpsDevice(self._handle, "HP-M283fdw")
+    def __init__(self, *, legacy_tls: bool = False) -> None:
+        self.https = FakeHttpsDevice(self._handle, "HP-M283fdw", legacy_tls=legacy_tls)
         self._sessions: dict[str, str] = {}  # session id -> CSRF token
         self.uploads = 0
 

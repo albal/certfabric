@@ -73,3 +73,16 @@ async def test_import_errors_are_reported(make_plugin, good_credentials):
     plugin = make_plugin(good_credentials, print)
     with pytest.raises(PluginError, match="invalid file or passphrase"):
         await plugin.deploy_certificate(cert.cert_pem, cert.key_pem, cert.fullchain_pem, cert.pkcs12("right"), "wrong")
+
+
+async def test_works_with_older_idrac_tls(good_credentials):
+    """iDRAC 8 firmware may offer only TLS 1.2 RSA/SHA-1 suites, which Python's defaults refuse."""
+    device = await FakeIdrac(legacy_tls=True).start()
+    try:
+        plugin = DellIdracRedfishPlugin(device.host, device.port, good_credentials, options={"verify_timeout": 1}, log=print)
+        assert (await plugin.test_connection()).success
+        cert = make_certificate()
+        assert await plugin.deploy_certificate(cert.cert_pem, cert.key_pem, cert.fullchain_pem, cert.pkcs12("pw"), "pw")
+        assert await plugin.post_deployment_verify(cert.fingerprint_sha256)
+    finally:
+        await device.stop()
