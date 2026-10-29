@@ -9,7 +9,7 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
-      - "8080:8080"
+      - "12345:8080"
     volumes:
       - certfabric-data:/data
       # Third-party Plugins: one directory per Plugin containing plugin.py. Read them first.
