@@ -18,7 +18,7 @@ Vocabulary is defined in [`GLOSSARY.md`](GLOSSARY.md); design decisions are in [
 | --- | --- | --- |
 | `generic_ssh_hook` | Linux servers, Unraid, TrueNAS Core | SFTP upload + reload command |
 | `proxmox_ve` | Proxmox VE 7 / 8 | PVE API, SSH (`pvenode cert set`) fallback |
-| `dell_idrac_redfish` | Dell iDRAC 7 / 8 / 9 / 10 | iDRAC 9+: Redfish `ImportSSLCertificate`; iDRAC 7/8: remote RACADM key + chain upload; then iDRAC restart |
+| `dell_idrac_redfish` | Dell iDRAC 7 / 8 / 9 / 10 | iDRAC 9+: Redfish `ImportSSLCertificate`; iDRAC 7/8: remote RACADM key + chain upload; then allows the Device's DNS name past the Host header check and restarts iDRAC |
 | `hp_pro_ews` | HP Color LaserJet Pro M283fdw and similar | Embedded Web Server upload (reverse-engineered) |
 
 Each Plugin documents its credentials and options in the dashboard's Add Device form. To write your own, see [`docs/plugins.md`](docs/plugins.md).

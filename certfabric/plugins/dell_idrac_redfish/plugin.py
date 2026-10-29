@@ -7,7 +7,10 @@ iDRAC 7 and 8 (12G / 13G servers) have no Redfish certificate import, so the key
 go up over the remote RACADM protocol instead: each is staged with `/cgi-bin/putfile`, then
 `racadm sslkeyupload` / `racadm sslcertupload` installs it.
 
-Either way iDRAC is then restarted so its web server serves the new certificate. Host power
+Either way the Device's DNS names (its hostname and SNI name, if not IP addresses) are then
+added to iDRAC's `WebServer.ManualDNSEntry`: with HostHeaderCheck on, iDRAC answers 400 to a
+name it does not know, so the new certificate would be unusable by name. Existing entries are
+kept. Finally iDRAC is restarted so its web server serves the new certificate. Host power
 state is not affected.
 
 Credentials: username + password (an iDRAC user with Configure Manager privilege).
@@ -15,6 +18,7 @@ Options:
   manager_id       default `iDRAC.Embedded.1`
   reset            restart iDRAC after the import (default true; the cert is not served until then)
   verify_timeout   seconds to wait for iDRAC to come back serving it (default 300)
+  allow_hostname   add the Device's DNS names to iDRAC's allowed host names (default true)
 """
 
 from __future__ import annotations
@@ -22,8 +26,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import html
+import ipaddress
 import re
 import struct
+from collections.abc import Awaitable, Callable
 from xml.sax.saxutils import escape
 
 import httpx
@@ -43,11 +49,21 @@ FIRST_REDFISH_IMPORT_GENERATION = 14
 # The upload slot remote racadm stages SSL keys and certificates in; commands refer to it as `sslcertfile`.
 RACADM_SSL_FILE = b"RACSSLCERT1"
 RACADM_MAX_FILE = 0x10000
+MANUAL_DNS_ENTRY = "WebServer.1.ManualDNSEntry"
+HOSTNAME = re.compile(r"^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*$")
 
 
 def _generation(model: str) -> int | None:
     match = re.match(r"(\d+)G\b", model)
     return int(match.group(1)) if match else None
+
+
+def _is_ip(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
 
 
 def _xml_field(body: str, tag: str) -> str | None:
@@ -127,6 +143,7 @@ class DellIdracRedfishPlugin(BaseDevicePlugin):
                     await self._import_with_racadm(client, privkey_pem, fullchain_pem)
                 else:
                     await self._import_with_redfish(client, pfx_bundle, pfx_password)
+                    await self._allow_hostnames_with_redfish(client)
                 if self.options.get("reset", True):
                     self.log("Restarting iDRAC so its web server serves the new certificate")
                     response = await client.post(
@@ -174,6 +191,19 @@ class DellIdracRedfishPlugin(BaseDevicePlugin):
             self.log("Uploading the certificate chain to iDRAC")
             await self._racadm_put(client, sid, fullchain_pem.encode(), "Certificate upload")
             await self._racadm_exec(client, sid, "racadm sslcertupload -f sslcertfile -t 1", "Certificate upload")
+
+            async def read() -> str:
+                output = await self._racadm_exec(
+                    client, sid, "racadm get iDRAC.WebServer.ManualDNSEntry", "Reading allowed host names"
+                )
+                match = re.search(r"^ManualDNSEntry=(.*)$", output, re.MULTILINE)
+                return match.group(1).strip() if match else ""
+
+            async def write(value: str) -> None:
+                command = f'racadm set iDRAC.WebServer.ManualDNSEntry "{value}"'
+                await self._racadm_exec(client, sid, command, "Setting allowed host names")
+
+            await self._allow_hostnames(read, write)
         finally:
             await client.post("/cgi-bin/logout", headers={"Cookie": f"sid={sid}"}, auth=None)
 
@@ -191,7 +221,7 @@ class DellIdracRedfishPlugin(BaseDevicePlugin):
         if len(response.content) < 4 or struct.unpack("<I", response.content[:4])[0] != 0:
             raise PluginError(f"{action} failed: iDRAC refused the file transfer")
 
-    async def _racadm_exec(self, client: httpx.AsyncClient, sid: str, command: str, action: str) -> None:
+    async def _racadm_exec(self, client: httpx.AsyncClient, sid: str, command: str, action: str) -> str:
         response = await client.post(
             "/cgi-bin/exec",
             content=(
@@ -203,9 +233,48 @@ class DellIdracRedfishPlugin(BaseDevicePlugin):
             auth=None,
         )
         self._check(response, action)
+        output = (_xml_field(response.text, "CMDOUTPUT") or "").strip()
         if _xml_field(response.text, "CMDRC") != "0x0":
-            output = (_xml_field(response.text, "CMDOUTPUT") or response.text[:200]).strip()
-            raise PluginError(f"{action} failed: {output}")
+            raise PluginError(f"{action} failed: {output or response.text[:200]}")
+        return output
+
+    async def _allow_hostnames_with_redfish(self, client: httpx.AsyncClient) -> None:
+        attributes = f"/redfish/v1/Managers/{self._manager}/Attributes"
+
+        async def read() -> str:
+            response = await client.get(attributes)
+            self._check(response, "Reading allowed host names")
+            return str(response.json().get("Attributes", {}).get(MANUAL_DNS_ENTRY) or "")
+
+        async def write(value: str) -> None:
+            response = await client.patch(attributes, json={"Attributes": {MANUAL_DNS_ENTRY: value}})
+            self._check(response, "Setting allowed host names")
+
+        await self._allow_hostnames(read, write)
+
+    def _hostnames(self) -> list[str]:
+        names: list[str] = []
+        for name in (self.host, self.sni):
+            if name and HOSTNAME.match(name) and not _is_ip(name) and name.lower() not in map(str.lower, names):
+                names.append(name)
+        return names
+
+    async def _allow_hostnames(
+        self, read: Callable[[], Awaitable[str]], write: Callable[[str], Awaitable[None]]
+    ) -> None:
+        """Add the Device's DNS names to iDRAC's ManualDNSEntry; a failure here does not fail the Deployment."""
+        names = self._hostnames()
+        if not names or not self.options.get("allow_hostname", True):
+            return
+        try:
+            entries = [entry.strip() for entry in (await read()).split(",") if entry.strip()]
+            known = {entry.lower() for entry in entries}
+            missing = [name for name in names if name.lower() not in known]
+            if missing:
+                self.log(f"Allowing {', '.join(missing)} through iDRAC's Host header check")
+                await write(",".join(entries + missing))
+        except (PluginError, httpx.HTTPError) as exc:
+            self.log(f"Could not add {', '.join(names)} to iDRAC's allowed host names: {describe(exc)}")
 
     async def post_deployment_verify(self, expected_fingerprint: str) -> bool:
         """iDRAC takes minutes to restart; poll until it serves the new certificate."""
