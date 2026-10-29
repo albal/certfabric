@@ -1,10 +1,32 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { api, type Certificate, type Device, type Plugin, type Summary } from "../api";
 import { RedeployButton } from "../components/RedeployButton";
 import { ExpiringBadge, StateBadge } from "../components/StateBadge";
 import { daysUntil, formatDate } from "../format";
+
+type SortKey = "name" | "target" | "plugin" | "certificate" | "expires" | "status";
+type Sort = { key: SortKey; dir: "asc" | "desc" };
+
+const COLUMNS: { key: SortKey; label: string }[] = [
+  { key: "name", label: "Device" },
+  { key: "target", label: "Target" },
+  { key: "plugin", label: "Hardware Plugin" },
+  { key: "certificate", label: "Managed Certificate" },
+  { key: "expires", label: "Active Expiration" },
+  { key: "status", label: "Status" },
+];
+
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+// Missing values (no certificate, no presented expiry) sort last in either direction.
+function compare(a: string | number | null, b: string | number | null, dir: Sort["dir"]): number {
+  if (a === null || b === null) return a === b ? 0 : a === null ? 1 : -1;
+  const order = typeof a === "number" && typeof b === "number" ? a - b : collator.compare(String(a), String(b));
+  return dir === "asc" ? order : -order;
+}
 
 export function FleetPage() {
   const devices = useQuery({ queryKey: ["devices"], queryFn: () => api.get<Device[]>("/api/devices"), refetchInterval: 15_000 });
@@ -16,6 +38,29 @@ export function FleetPage() {
   const pluginById = new Map((plugins.data ?? []).map((p) => [p.plugin_id, p]));
   const threshold = summary.data?.renewal_threshold_days ?? 28;
   const now = summary.data ? new Date(summary.data.server_time) : new Date();
+  const [sort, setSort] = useState<Sort>({ key: "name", dir: "asc" });
+
+  const sortValue = (device: Device): string | number | null => {
+    switch (sort.key) {
+      case "name":
+        return device.name;
+      case "target":
+        return `${device.hostname}:${device.port}`;
+      case "plugin":
+        return pluginById.get(device.plugin_id)?.plugin_name ?? device.plugin_id;
+      case "certificate":
+        return (device.assigned_certificate_id && certById.get(device.assigned_certificate_id)?.domain_primary) || null;
+      case "expires": {
+        const expires = device.presented_certificate?.expires_at;
+        return expires ? new Date(expires).getTime() : null;
+      }
+      case "status":
+        return device.state;
+    }
+  };
+  const sorted = [...(devices.data ?? [])].sort((a, b) => compare(sortValue(a), sortValue(b), sort.dir));
+  const toggleSort = (key: SortKey) =>
+    setSort((prev) => ({ key, dir: prev.key === key && prev.dir === "asc" ? "desc" : "asc" }));
 
   return (
     <div className="p-6">
@@ -29,12 +74,24 @@ export function FleetPage() {
         <table className="w-full text-left text-sm" data-testid="fleet-table">
           <thead className="bg-slate-900 text-xs uppercase tracking-wide text-white">
             <tr>
-              <th className="px-4 py-2">Device</th>
-              <th className="px-4 py-2">Target</th>
-              <th className="px-4 py-2">Hardware Plugin</th>
-              <th className="px-4 py-2">Managed Certificate</th>
-              <th className="px-4 py-2">Active Expiration</th>
-              <th className="px-4 py-2">Status</th>
+              {COLUMNS.map(({ key, label }) => (
+                <th
+                  key={key}
+                  className="px-0 py-0"
+                  aria-sort={sort.key === key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleSort(key)}
+                    className="flex w-full items-center gap-1 px-4 py-2 text-left uppercase tracking-wide hover:bg-slate-700"
+                  >
+                    {label}
+                    <span aria-hidden className={sort.key === key ? "" : "text-slate-500"}>
+                      {sort.key === key ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}
+                    </span>
+                  </button>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -45,7 +102,7 @@ export function FleetPage() {
                 </td>
               </tr>
             )}
-            {devices.data?.map((device) => {
+            {sorted.map((device) => {
               const cert = device.assigned_certificate_id ? certById.get(device.assigned_certificate_id) : undefined;
               const expires = device.presented_certificate?.expires_at ?? null;
               const days = expires ? daysUntil(expires, now) : null;
