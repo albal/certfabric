@@ -96,3 +96,29 @@ async def test_expired_session_returns_to_login(client, clock, page):
     clock.advance(timedelta(days=8))
     await page.reload()
     await expect(page).to_have_url("/login")
+
+
+async def test_fleet_sorts_by_clicking_headers(client, page, tls_device):
+    second = await FakeTlsDevice().start()
+    try:
+        await create_device(client, tls_device, name="Bravo")
+        await create_device(client, second, name="alpha")
+        await create_device(client, tls_device, name="Charlie")
+
+        await sign_in(page)
+        names = page.get_by_test_id("device-row").locator("td:first-child")
+        header = page.get_by_role("columnheader", name="Device")
+        await expect(names).to_have_text(["alpha", "Bravo", "Charlie"])
+        await expect(header).to_have_attribute("aria-sort", "ascending")
+
+        await header.get_by_role("button").click()
+        await expect(names).to_have_text(["Charlie", "Bravo", "alpha"])
+        await expect(header).to_have_attribute("aria-sort", "descending")
+
+        await header.get_by_role("button").click()
+        await expect(names).to_have_text(["alpha", "Bravo", "Charlie"])
+
+        await page.get_by_role("columnheader", name="Target").get_by_role("button").click()
+        await expect(header).to_have_attribute("aria-sort", "none")
+    finally:
+        await second.stop()
