@@ -1,9 +1,17 @@
-"""A simulated Dell iDRAC: Redfish with basic auth; an imported cert is served after a reset."""
+"""A simulated Dell iDRAC: an imported cert is served after a reset.
+
+A 14G+ iDRAC (9/10) imports a PKCS#12 bundle over Redfish. A 13G iDRAC 8 has no Redfish
+certificate import and instead takes the key and chain over the remote RACADM protocol, as
+observed on a T630 running 2.86.86.86.
+"""
 
 from __future__ import annotations
 
 import base64
 import json
+import re
+import secrets
+import struct
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.serialization import pkcs12
@@ -23,11 +31,26 @@ def _error(status: int, message: str) -> Response:
     return Response.json({"error": {"@Message.ExtendedInfo": [{"Message": message}]}}, status)
 
 
+def _racadm(tag: str, **fields: str) -> Response:
+    inner = "".join(f"<{k}>{v}</{k}>" for k, v in fields.items())
+    return Response(200, f'<?xml version="1.0" encoding="UTF-8"?><{tag}><RESP>{inner}</RESP></{tag}>'.encode())
+
+
 class FakeIdrac:
-    def __init__(self, *, legacy_tls: bool = False) -> None:
+    def __init__(self, *, legacy_tls: bool = False, model: str = "14G Monolithic") -> None:
         self.https = FakeHttpsDevice(self._handle, "idrac.factory", legacy_tls=legacy_tls)
+        self.model = model
         self.pending: tuple[str, str] | None = None
         self.resets = 0
+        # remote RACADM state (iDRAC 8)
+        self.sessions: set[str] = set()
+        self.staged: bytes | None = None
+        self.pending_key: str | None = None
+        self.pending_chain: str | None = None
+
+    @property
+    def racadm(self) -> bool:
+        return int(self.model.split("G")[0]) < 14
 
     @property
     def host(self) -> str:
@@ -45,12 +68,17 @@ class FakeIdrac:
         await self.https.stop()
 
     async def _handle(self, request: Request) -> Response:
+        if request.path.startswith("/cgi-bin/") and self.racadm:
+            return self._handle_racadm(request)
         expected = "Basic " + base64.b64encode(f"{USERNAME}:{PASSWORD}".encode()).decode()
         if request.headers.get("authorization") != expected:
             return Response(401)
         if request.path == MANAGER and request.method == "GET":
-            return Response.json({"Model": "14G Monolithic", "FirmwareVersion": "7.00.00.171"})
+            firmware = "2.86.86.86" if self.racadm else "7.00.00.171"
+            return Response.json({"Model": self.model, "FirmwareVersion": firmware})
         if request.path == IMPORT and request.method == "POST":
+            if self.racadm:
+                return _error(405, "Unable to run the method because the requested HTTP method is not allowed.")
             body = request.json()
             if body.get("CertificateType") != "CustomCertificate":
                 return _error(400, "Unsupported CertificateType")
@@ -70,8 +98,45 @@ class FakeIdrac:
             if json.loads(request.body).get("ResetType") != "GracefulRestart":
                 return _error(400, "Invalid ResetType")
             self.resets += 1
+            if self.pending_key and self.pending_chain:
+                self.pending = (self.pending_chain, self.pending_key)
+                self.pending_key = self.pending_chain = None
             if self.pending:
                 self.https.present(*self.pending)
                 self.pending = None
             return Response(204)
+        return Response(404)
+
+    def _handle_racadm(self, request: Request) -> Response:
+        body = request.body.decode(errors="replace")
+        if request.path == "/cgi-bin/login":
+            username = re.search(r"<USERNAME>(.*?)</USERNAME>", body)
+            password = re.search(r"<PASSWORD>(.*?)</PASSWORD>", body)
+            if not (username and password and (username[1], password[1]) == (USERNAME, PASSWORD)):
+                return _racadm("LOGIN", RC="0x10", SID="", STATENAME="SESSION_INVALID")
+            sid = secrets.token_urlsafe(12)
+            self.sessions.add(sid)
+            return _racadm("LOGIN", RC="0x0", SID=sid, STATENAME="OK")
+        sid = request.cookies().get("sid")
+        if request.path == "/cgi-bin/logout":
+            self.sessions.discard(sid)
+            return Response(200)
+        if sid not in self.sessions:
+            return Response(200, struct.pack("<I", 1))
+        if request.path == "/cgi-bin/putfile":
+            name, length, flag = struct.unpack("<32sIB3x", request.body[:40])
+            if name.rstrip(b"\0") != b"RACSSLCERT1" or flag != 0 or len(request.body) != 40 + length:
+                return Response(200, struct.pack("<I", 2))
+            self.staged = request.body[40:]
+            return Response(200, struct.pack("<I", 0))
+        if request.path == "/cgi-bin/exec":
+            command = re.search(r"<CMDINPUT>(.*?)</CMDINPUT>", body)[1]
+            staged, self.staged = (self.staged or b"").decode(), None
+            if command == "racadm sslkeyupload -f sslcertfile -t 1" and "PRIVATE KEY-----" in staged:
+                self.pending_key = staged
+                return _racadm("EXEC", RC="0x0", CMDRC="0x0", CMDOUTPUT="SSL key successfully uploaded to the RAC.")
+            if command == "racadm sslcertupload -f sslcertfile -t 1" and "BEGIN CERTIFICATE" in staged:
+                self.pending_chain = staged
+                return _racadm("EXEC", RC="0x0", CMDRC="0x0", CMDOUTPUT="Certificate successfully uploaded to the RAC.")
+            return _racadm("EXEC", RC="0x0", CMDRC="0x2", CMDOUTPUT="ERROR: Unable to allocate memory for operation.")
         return Response(404)
