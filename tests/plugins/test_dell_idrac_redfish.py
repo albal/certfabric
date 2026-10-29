@@ -119,3 +119,47 @@ async def test_idrac8_command_errors_are_reported(idrac8, good_credentials):
         await plugin.deploy_certificate(cert.cert_pem, cert.key_pem, "not a certificate", cert.pkcs12("pw"), "pw")
     assert idrac8.resets == 0
     assert idrac8.sessions == set()
+
+
+def plugin_for(device, credentials, log=print, sni="idrac.lab.example.com", **options):
+    return DellIdracRedfishPlugin(
+        device.host, device.port, credentials, options={"verify_timeout": 0.5, **options}, sni=sni, log=log
+    )
+
+
+async def deploy(plugin):
+    cert = make_certificate("idrac.lab.example.com")
+    assert await plugin.deploy_certificate(cert.cert_pem, cert.key_pem, cert.fullchain_pem, cert.pkcs12("pw"), "pw")
+
+
+@pytest.mark.parametrize("model", ["14G Monolithic", "13G Monolithic"])
+async def test_adds_the_dns_name_to_the_host_header_allow_list(model, good_credentials):
+    """With HostHeaderCheck on, iDRAC answers 400 to names it does not know, so the cert would be unusable by name."""
+    device = await FakeIdrac(model=model).start()
+    try:
+        device.manual_dns_entry = "bmc.old.example.com"
+        await deploy(plugin_for(device, good_credentials))
+        assert device.manual_dns_entry == "bmc.old.example.com,idrac.lab.example.com"
+        await deploy(plugin_for(device, good_credentials, sni="IDRAC.lab.example.com"))
+        assert device.manual_dns_entry == "bmc.old.example.com,idrac.lab.example.com"
+    finally:
+        await device.stop()
+
+
+async def test_ip_addresses_are_not_added(simulator, good_credentials):
+    await deploy(plugin_for(simulator, good_credentials, sni=None))
+    assert simulator.host.replace(".", "").isdigit()
+    assert simulator.manual_dns_entry == ""
+
+
+async def test_allow_hostname_can_be_turned_off(simulator, good_credentials):
+    await deploy(plugin_for(simulator, good_credentials, allow_hostname=False))
+    assert simulator.manual_dns_entry == ""
+
+
+async def test_failing_to_allow_the_name_does_not_fail_the_deployment(idrac8, good_credentials):
+    lines = []
+    idrac8.refuse_settings = True
+    await deploy(plugin_for(idrac8, good_credentials, log=lines.append))
+    assert idrac8.resets == 1
+    assert any("Could not add idrac.lab.example.com" in line for line in lines)

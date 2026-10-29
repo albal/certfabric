@@ -8,6 +8,7 @@ observed on a T630 running 2.86.86.86.
 from __future__ import annotations
 
 import base64
+import html
 import json
 import re
 import secrets
@@ -47,6 +48,9 @@ class FakeIdrac:
         self.staged: bytes | None = None
         self.pending_key: str | None = None
         self.pending_chain: str | None = None
+        # iDRAC.WebServer.ManualDNSEntry: extra names the Host header check accepts
+        self.manual_dns_entry = ""
+        self.refuse_settings = False
 
     @property
     def racadm(self) -> bool:
@@ -76,6 +80,11 @@ class FakeIdrac:
         if request.path == MANAGER and request.method == "GET":
             firmware = "2.86.86.86" if self.racadm else "7.00.00.171"
             return Response.json({"Model": self.model, "FirmwareVersion": firmware})
+        if request.path == f"{MANAGER}/Attributes" and not self.racadm:
+            if request.method == "PATCH":
+                self.manual_dns_entry = request.json()["Attributes"]["WebServer.1.ManualDNSEntry"]
+                return Response(200)
+            return Response.json({"Attributes": {"WebServer.1.ManualDNSEntry": self.manual_dns_entry}})
         if request.path == IMPORT and request.method == "POST":
             if self.racadm:
                 return _error(405, "Unable to run the method because the requested HTTP method is not allowed.")
@@ -130,7 +139,14 @@ class FakeIdrac:
             self.staged = request.body[40:]
             return Response(200, struct.pack("<I", 0))
         if request.path == "/cgi-bin/exec":
-            command = re.search(r"<CMDINPUT>(.*?)</CMDINPUT>", body)[1]
+            command = html.unescape(re.search(r"<CMDINPUT>(.*?)</CMDINPUT>", body)[1])
+            if command == "racadm get iDRAC.WebServer.ManualDNSEntry":
+                output = f"[Key=iDRAC.Embedded.1#WebServer.1]\r\nManualDNSEntry={self.manual_dns_entry}"
+                return _racadm("EXEC", RC="0x0", CMDRC="0x0", CMDOUTPUT=output)
+            set_entry = re.fullmatch(r'racadm set iDRAC.WebServer.ManualDNSEntry "(.*)"', command)
+            if set_entry and not self.refuse_settings:
+                self.manual_dns_entry = set_entry[1]
+                return _racadm("EXEC", RC="0x0", CMDRC="0x0", CMDOUTPUT="Object value modified successfully")
             staged, self.staged = (self.staged or b"").decode(), None
             if command == "racadm sslkeyupload -f sslcertfile -t 1" and "PRIVATE KEY-----" in staged:
                 self.pending_key = staged
