@@ -66,6 +66,10 @@ class Deployer:
                     raise DeploymentRefused("Device is Monitor-only: assign a Certificate first")
                 if self._state.plugins.get(device.plugin_id) is None:
                     raise DeploymentRefused(f"Plugin {device.plugin_id!r} is not installed")
+                # Callers decide from reads taken before a Deployment that just finished may have
+                # pushed the backoff out; re-check under the lock.
+                if trigger_source != "MANUAL" and auto_deploy_blocked(device, self._state.clock.now()):
+                    raise DeploymentRefused("Waiting out the backoff after a failed Deployment")
             if trigger_source == "MANUAL":
                 await self._reset_failures(device_id)
         except BaseException:

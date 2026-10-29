@@ -1,5 +1,9 @@
 from datetime import datetime, timedelta
 
+import pytest
+
+from certfabric.deployments import DeploymentRefused
+
 from tests.conftest import DEVICE_PASSWORD, deploy, managed_device, settle
 from tests.fakes import fake_device_control
 from tests.fakes.certs import fingerprint, self_signed
@@ -19,6 +23,15 @@ async def drifted_failing_device(client, app, clock, tls_device):
     await client.post(f"/api/devices/{device['id']}/probe")  # Drift -> first heal fails
     await settle(app)
     return device, cert, control
+
+
+async def test_automatic_start_rechecks_the_backoff(client, app, clock, tls_device):
+    """The retry sweep picks Devices from a read that a just-finished Deployment can make stale."""
+    device, _, control = await drifted_failing_device(client, app, clock, tls_device)
+    with pytest.raises(DeploymentRefused, match="backoff"):
+        await app.state.deployer.start(device["id"], "RETRY")
+    assert not app.state.deployer.is_running(device["id"])
+    assert control.deploys == 2
 
 
 async def test_retries_back_off_then_deploy_failed(client, app, clock, scheduler, tls_device, webhooks):
