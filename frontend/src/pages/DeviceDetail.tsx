@@ -185,7 +185,7 @@ export function DeviceDetailPage({ deviceId }: { deviceId: string }) {
             <li key={entry.id} data-testid="deployment" className="border-t border-slate-200 px-4 py-3 first:border-t-0">
               <details>
                 <summary className="flex cursor-pointer flex-wrap items-center gap-3 text-sm">
-                  <span className={`rounded px-2 py-0.5 text-xs font-semibold ${entry.success ? "bg-slate-900 text-white" : "bg-red-600 text-white"}`}>
+                  <span className={`rounded px-2 py-0.5 text-xs font-semibold ${entry.success ? "bg-green-700 text-white" : "bg-red-600 text-white"}`}>
                     {entry.success ? "Succeeded" : "Failed"}
                   </span>
                   <span className="font-semibold">{TRIGGERS[entry.trigger_source] ?? entry.trigger_source}</span>
