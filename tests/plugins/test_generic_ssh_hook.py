@@ -2,7 +2,7 @@ import stat
 
 import pytest
 
-from certfabric.plugins.base import DeviceCredentials
+from certfabric.plugins.base import DeviceCredentials, PluginError
 from certfabric.plugins.contract import PluginContract, make_certificate
 from certfabric.plugins.generic_ssh_hook.plugin import GenericSshHookPlugin
 from tests.fakes import ssh_device
@@ -68,6 +68,17 @@ async def test_failing_reload_command_fails_the_deployment(simulator, make_plugi
     plugin = make_plugin(good_credentials, print, reload_command="systemctl reload nginx")
     with pytest.raises(PluginError, match="status 127"):
         await plugin.deploy_certificate(cert.cert_pem, cert.key_pem, cert.fullchain_pem, b"", None)
+
+
+async def test_unwritable_path_names_the_file_and_user(simulator, make_plugin, good_credentials):
+    locked = simulator.root / "etc" / "locked"
+    locked.mkdir()
+    locked.chmod(0o555)
+    plugin = make_plugin(good_credentials, print, key_path="/etc/locked/device.key")
+    cert = make_certificate()
+    with pytest.raises(PluginError, match=f"/etc/locked/device.key as {ssh_device.USERNAME}"):
+        await plugin.deploy_certificate(cert.cert_pem, cert.key_pem, cert.fullchain_pem, b"", None)
+    locked.chmod(0o755)
 
 
 async def test_pinned_host_key_is_enforced(simulator, make_plugin, good_credentials):
