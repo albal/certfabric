@@ -8,9 +8,9 @@ CertFabric issues certificates with [`acme.sh`](https://github.com/acmesh-offici
 - serving an earlier CertFabric Certificate: **Outdated**, redeployed quietly;
 - serving anything else (a factory certificate after a reset): **Drift**, redeployed and alarmed.
 
-Certificates renew automatically 28 days before expiry (configurable) and are redeployed to every device that uses them. Failed Deployments back off (1 h, 6 h, 24 h) and stop after three in a row (**Deploy Failed**) until you intervene. Webhooks report Drift, Unreachable devices, Deploy Failed and failed renewals.
+Certificates renew automatically 28 days before expiry (configurable) and are redeployed to every device that uses them. Failed Deployments are retried after 1 h, then 6 h, and stop after three failures in a row (**Deploy Failed**) until you intervene. Webhooks report Drift, Unreachable devices, Deploy Failed and failed renewals.
 
-Vocabulary is defined in [`GLOSSARY.md`](GLOSSARY.md); design decisions are in [`docs/adr/`](docs/adr/) and [`PRD.md`](PRD.md).
+Vocabulary is defined in [`GLOSSARY.md`](GLOSSARY.md); how it fits together is in [`ARCHITECTURE.md`](ARCHITECTURE.md); design decisions are in [`docs/adr/`](docs/adr/) and [`PRD.md`](PRD.md).
 
 ## Built-in Plugins
 
