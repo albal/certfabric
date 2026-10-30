@@ -1,3 +1,5 @@
+import asyncio
+
 from playwright.async_api import expect
 
 from tests.conftest import CF_TOKEN, DEVICE_PASSWORD, issue_certificate, settle
@@ -90,6 +92,30 @@ async def test_add_test_and_assign_a_device(client, app, page, tls_device):
     await page.get_by_role("button", name="Redeploy Now").click()
     await expect(page.get_by_test_id("terminal-status")).to_have_text("Succeeded")
     assert fingerprint(tls_device.cert_pem) == cert["fingerprint_sha256"]
+
+
+async def test_testing_a_connection_shows_progress(client, page):
+    release = asyncio.Event()
+
+    async def hold(route):
+        await release.wait()
+        await route.fulfill(json={"success": True, "message": "Reached it"})
+
+    await page.route("**/api/devices/test-connection", hold)
+    await sign_in(page)
+    await page.get_by_role("link", name="Add Device").click()
+    button = page.get_by_role("button", name="Test connection")
+    await button.click()
+
+    progress = page.get_by_test_id("test-progress")
+    await expect(progress).to_have_text("Testing connection…")
+    await expect(progress.locator(".animate-spin")).to_be_visible()
+    await expect(button).to_be_disabled()
+
+    release.set()
+    await expect(page.get_by_test_id("test-result")).to_have_text("✓ Reached it")
+    await expect(progress).to_be_hidden()
+    await expect(button).to_be_enabled()
 
 
 async def test_edit_a_device_keeps_secrets_unless_changed(client, page, tls_device):

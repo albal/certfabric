@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>CertFabric</title>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3b82f6" />
+      <stop offset="1" stop-color="#312e81" />
+    </linearGradient>
+    <linearGradient id="seal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fde047" />
+      <stop offset="1" stop-color="#f59e0b" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#tile)" />
+  <rect x="9" y="11" width="46" height="32" rx="4" fill="#fff" />
+  <path d="M16 20h32M16 28h15" fill="none" stroke="#94a3b8" stroke-width="4" stroke-linecap="round" />
+  <path d="M35 42v17l7-4.5 7 4.5V42z" fill="#d97706" />
+  <circle cx="42" cy="37" r="13" fill="url(#seal)" stroke="#1e3a8a" stroke-width="2.5" />
+  <path d="M35.5 37.5l4.5 4.5 8.5-9.5" fill="none" stroke="#1e3a8a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

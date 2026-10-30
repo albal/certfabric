@@ -133,11 +133,13 @@ export function Button({
   onClick,
   variant = "primary",
   type = "button",
+  disabled = false,
 }: {
   children: ReactNode;
   onClick?: () => void;
   variant?: "primary" | "secondary" | "danger";
   type?: "button" | "submit";
+  disabled?: boolean;
 }) {
   const styles = {
     primary: "bg-blue-600 text-white hover:bg-blue-700",
@@ -145,10 +147,14 @@ export function Button({
     danger: "border border-red-600 bg-white text-red-600 hover:bg-red-50",
   }[variant];
   return (
-    <button type={type} onClick={onClick} className={`px-3 py-1.5 text-sm font-semibold ${styles}`}>
+    <button type={type} onClick={onClick} disabled={disabled} className={`px-3 py-1.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${styles}`}>
       {children}
     </button>
   );
+}
+
+export function Spinner() {
+  return <span aria-hidden="true" className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />;
 }
 
 export function ErrorText({ error }: { error: string | null }) {

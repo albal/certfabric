@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
 
 import { api, type Certificate, type Device, type Plugin } from "../api";
-import { Button, Card, ErrorText, KeyValueEditor, Page, Select, TextField, errorMessage, toObject } from "../components/ui";
+import { Button, Card, ErrorText, KeyValueEditor, Page, Select, Spinner, TextField, errorMessage, toObject } from "../components/ui";
 
 type TestResult = { success: boolean; message: string };
 
@@ -32,6 +32,7 @@ export function DeviceFormPage({ device }: { device?: Device }) {
   const [certificateId, setCertificateId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [test, setTest] = useState<TestResult | null>(null);
+  const [testing, setTesting] = useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -58,6 +59,7 @@ export function DeviceFormPage({ device }: { device?: Device }) {
   async function testConnection() {
     setTest(null);
     setError(null);
+    setTesting(true);
     try {
       // Saved Devices without new secrets are tested with what is stored.
       setTest(
@@ -67,6 +69,8 @@ export function DeviceFormPage({ device }: { device?: Device }) {
       );
     } catch (exc) {
       setError(errorMessage(exc));
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -169,11 +173,17 @@ export function DeviceFormPage({ device }: { device?: Device }) {
           </p>
         )}
         <ErrorText error={error} />
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <Button type="submit">{device ? "Save Device" : "Add Device"}</Button>
-          <Button variant="secondary" onClick={testConnection}>
+          <Button variant="secondary" onClick={testConnection} disabled={testing}>
             Test connection
           </Button>
+          {testing && (
+            <span role="status" data-testid="test-progress" className="ml-1 inline-flex items-center gap-2 text-sm text-slate-600">
+              <Spinner />
+              Testing connection…
+            </span>
+          )}
         </div>
       </form>
     </Page>
