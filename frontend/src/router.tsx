@@ -65,8 +65,11 @@ function Shell() {
     <TerminalProvider>
       <div className="flex min-h-screen">
         <aside className="flex w-56 shrink-0 flex-col bg-slate-900 text-white">
-          <div className="border-b border-slate-700 px-5 py-4 text-lg font-bold tracking-tight">
-            Cert<span className="text-blue-500">Fabric</span>
+          <div className="flex items-center gap-2 border-b border-slate-700 px-5 py-4 text-lg font-bold tracking-tight">
+            <img src="/favicon.svg" alt="" className="h-7 w-7" />
+            <span>
+              Cert<span className="text-blue-500">Fabric</span>
+            </span>
           </div>
           <nav className="flex flex-1 flex-col gap-1 p-3 text-sm">
             {NAV.map((item) => (

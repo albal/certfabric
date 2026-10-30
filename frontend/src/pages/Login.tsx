@@ -33,6 +33,7 @@ export function LoginPage({ setupRequired }: { setupRequired: boolean }) {
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-900 p-4">
       <form onSubmit={submit} className="w-full max-w-sm border border-black bg-white p-8" aria-label="Sign in">
+        <img src="/favicon.svg" alt="" className="mb-3 h-12 w-12" />
         <h1 className="text-2xl font-bold text-slate-900">CertFabric</h1>
         <p className="mb-6 mt-1 text-sm text-slate-500">
           {setupRequired ? "Set the admin password to finish setup." : "Sign in to manage your certificates."}

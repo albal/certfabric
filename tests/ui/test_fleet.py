@@ -25,6 +25,17 @@ async def test_first_run_sets_the_password(anon, page):
     await expect(page.get_by_test_id("metric-devices")).to_have_text("0")
 
 
+async def test_app_icon_loads_on_the_login_page_tab_and_sidebar(client, page):
+    await page.goto("/")
+    loaded = "img => img.complete && img.naturalWidth > 0"
+    assert await page.get_by_role("form", name="Sign in").locator("img").evaluate(loaded)
+    href = await page.locator('link[rel="icon"]').get_attribute("href")
+    icon = await page.request.get(href)
+    assert icon.ok and icon.headers["content-type"].startswith("image/svg+xml")
+    await sign_in(page)
+    assert await page.locator("aside img").evaluate(loaded)
+
+
 async def test_login_and_logout(client, page):
     await page.goto("/")
     await page.get_by_label("Admin password").fill("not the password")
