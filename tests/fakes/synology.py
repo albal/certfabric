@@ -15,6 +15,18 @@ FACTORY_ID = "FaCtOrY"
 FACTORY_DESC = "synology.factory"
 
 
+# What DSM's nginx serves on ports 80 and 443 for any path, whatever the request.
+REDIRECT_PAGE = b"""<!DOCTYPE html>
+<html>
+    <body>
+        <input type="hidden" id="http" name="http" value="5000">
+        <input type="hidden" id="https" name="https" value="5001">
+        <input type="hidden" id="prefer_https" name="prefer_https" value="true">
+    </body>
+</html>
+"""
+
+
 def error(code: int) -> Response:
     return Response.json({"success": False, "error": {"code": code}})
 
@@ -40,6 +52,7 @@ class FakeSynology:
         self.logins = 0
         self.import_error: int | None = None
         self.not_dsm = False
+        self.redirect_only = False
         self.fail_logout = False
         self._sessions: dict[str, str] = {}  # sid -> SynoToken
 
@@ -73,6 +86,8 @@ class FakeSynology:
     async def _handle(self, request: Request) -> Response:
         if self.not_dsm:
             return Response(404)
+        if self.redirect_only:
+            return Response(200, REDIRECT_PAGE, {"Content-Type": "text/html"})
         if request.path == "/webapi/query.cgi":
             return ok({"SYNO.API.Auth": {"path": "entry.cgi", "minVersion": 1, "maxVersion": 7}})
         if request.path != "/webapi/entry.cgi":
@@ -105,9 +120,14 @@ class FakeSynology:
             self._sessions[sid] = "plain"
         return ok({"sid": sid, "synotoken": self._sessions[sid]})
 
+    def _authenticated(self, request: Request, sid: str | None) -> bool:
+        """DSM answers 119 unless a session's calls carry its SynoToken in this header."""
+        token = self._sessions.get(sid or "")
+        return bool(token) and request.headers.get("x-syno-token") == token
+
     def _list(self, request: Request) -> Response:
         sid = request.form().get("_sid")
-        if sid not in self._sessions:
+        if not self._authenticated(request, sid):
             return error(119)
         if self._sessions[sid] == "plain":
             return error(105)
@@ -116,8 +136,8 @@ class FakeSynology:
         )
 
     def _import(self, request: Request) -> Response:
-        token = self._sessions.get(request.query.get("_sid", ""))
-        if not token or request.query.get("SynoToken") != token:
+        sid = request.query.get("_sid")
+        if not self._authenticated(request, sid) or request.query.get("SynoToken") != self._sessions[sid]:
             return error(119)
         if self.import_error is not None:
             return error(self.import_error)
