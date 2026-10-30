@@ -42,7 +42,7 @@ Available on `self`:
 | --- | --- |
 | `host`, `port`, `sni` | Where the Device is and the name it serves |
 | `credentials` | `username`, `password`, `api_token`, `pfx_passphrase`, and `extra` (a dict of further secrets) |
-| `options` | Non-secret settings the admin entered (dict) |
+| `options` | Non-secret settings the admin entered (dict), with surrounding whitespace removed from keys and string values |
 | `log(line)` | Write to the Deployment log; known secrets are redacted, but avoid logging them anyway |
 | `served_fingerprint()` | Probe the Device's TLS port and return the SHA-256 it serves |
 

@@ -94,6 +94,21 @@ async def test_add_test_and_assign_a_device(client, app, page, tls_device):
     assert fingerprint(tls_device.cert_pem) == cert["fingerprint_sha256"]
 
 
+async def test_device_options_are_trimmed_before_they_are_typed(client, page, tls_device):
+    await sign_in(page)
+    await page.get_by_role("link", name="Add Device").click()
+    await page.get_by_label("Name", exact=True).fill("Spaced")
+    await page.get_by_label("Plugin").select_option("fake_device")
+    await page.get_by_label("Hostname or IP").fill(tls_device.host)
+    await page.get_by_label("Port").fill(str(tls_device.port))
+    await page.get_by_role("button", name="+ Add options").click()
+    await page.get_by_label("Options name 1").fill(" reset ")
+    await page.get_by_label("Options value 1").fill("  false  ")
+    await page.get_by_role("button", name="Add Device").click()
+    await expect(page.get_by_role("heading", name="Spaced")).to_be_visible()
+    assert (await client.get("/api/devices")).json()[0]["plugin_options"] == {"reset": False}
+
+
 async def test_testing_a_connection_shows_progress(client, page):
     release = asyncio.Event()
 
