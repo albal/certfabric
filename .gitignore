@@ -9,5 +9,5 @@ node_modules/
 dist/
 frontend/dist/
 certfabric/static/
-plugins/
+/plugins/
 .env
