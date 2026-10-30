@@ -14,6 +14,9 @@ set -euo pipefail
 REPO="${CERTFABRIC_REPO:-https://github.com/albal/certfabric.git}"
 REF="${CERTFABRIC_REF:-main}"
 ACME_SH_VERSION="${ACME_SH_VERSION:-3.1.1}"
+NODE_VERSION="${NODE_VERSION:-26.13.0}"
+PYTHON_VERSION="${PYTHON_VERSION:-3.15}"
+UV_VERSION="${UV_VERSION:-0.13.6}"
 APP=/opt/certfabric
 DATA=/var/lib/certfabric
 CONF=/etc/certfabric
@@ -22,7 +25,7 @@ CONF=/etc/certfabric
 
 echo "==> Installing packages"
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv git curl openssl ca-certificates nodejs npm >/dev/null
+apt-get install -y -qq git curl openssl ca-certificates libatomic1 >/dev/null
 
 id certfabric >/dev/null 2>&1 || useradd --system --home-dir "$DATA" --shell /usr/sbin/nologin certfabric
 install -d -o certfabric -g certfabric -m 0750 "$DATA"
@@ -36,14 +39,37 @@ else
   git clone -q --branch "$REF" "$REPO" "$APP/src"
 fi
 
+# Debian's Python and Node.js are too old, so CertFabric keeps its own copies under $APP.
+# The service runs with ProtectHome, so Python cannot live in uv's default place under /root.
+export UV_INSTALL_DIR="$APP/uv" UV_PYTHON_INSTALL_DIR="$APP/python" UV_NO_MODIFY_PATH=1
+if [[ "$("$APP/uv/uv" --version 2>/dev/null)" != "uv $UV_VERSION "* ]]; then
+  echo "==> Installing uv $UV_VERSION"
+  curl -fsSL "https://astral.sh/uv/$UV_VERSION/install.sh" | sh >/dev/null
+fi
+
+if [[ "$("$APP/node/bin/node" --version 2>/dev/null)" != "v$NODE_VERSION" ]]; then
+  echo "==> Installing Node.js $NODE_VERSION"
+  case "$(uname -m)" in
+    x86_64) node_arch=x64 ;;
+    aarch64) node_arch=arm64 ;;
+    *) echo "No Node.js build for $(uname -m)" >&2; exit 1 ;;
+  esac
+  rm -rf "$APP/node" && mkdir "$APP/node"
+  curl -fsSL "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-$node_arch.tar.gz" \
+    | tar -xz --strip-components=1 -C "$APP/node"
+fi
+
 echo "==> Building the dashboard"
-(cd "$APP/src/frontend" && npm ci --no-audit --no-fund --silent && npm run build --silent)
+(cd "$APP/src/frontend" && export PATH="$APP/node/bin:$PATH" && npm ci --no-audit --no-fund --silent && npm run build --silent)
 rm -rf "$APP/src/certfabric/static" && cp -r "$APP/src/frontend/dist" "$APP/src/certfabric/static"
 
 echo "==> Installing the application"
-[[ -d "$APP/venv" ]] || python3 -m venv "$APP/venv"
-"$APP/venv/bin/pip" install -q --upgrade pip
-"$APP/venv/bin/pip" install -q "$APP/src"
+"$APP/uv/uv" python install --quiet "$PYTHON_VERSION"
+# An upgrade may find a venv built on an older Python, which cannot be reused.
+if [[ "$("$APP/venv/bin/python" --version 2>/dev/null)" != "Python $PYTHON_VERSION"* ]]; then
+  "$APP/uv/uv" venv --quiet --clear --python "$PYTHON_VERSION" "$APP/venv"
+fi
+"$APP/uv/uv" pip install --quiet --python "$APP/venv/bin/python" "$APP/src"
 
 echo "==> Installing acme.sh $ACME_SH_VERSION"
 if [[ ! -x /opt/acme.sh/acme.sh ]] || ! grep -q "VER=$ACME_SH_VERSION" /opt/acme.sh/acme.sh; then

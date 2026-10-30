@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 
 # --- Dashboard ---------------------------------------------------------------
-FROM node:20-bookworm-slim AS dashboard
+# Static files, so build them natively once rather than under emulation for each architecture.
+FROM --platform=$BUILDPLATFORM node:26-bookworm-slim AS dashboard
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -9,7 +10,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # --- Application ---------------------------------------------------------------
-FROM python:3.12-slim-bookworm
+FROM python:3.15-slim-bookworm
 
 ARG ACME_SH_VERSION=3.1.1
 RUN apt-get update \

@@ -37,11 +37,15 @@ docker compose up -d
 
 Open `http://<host>:8080` and set the admin password. Data lives in the `certfabric-data` volume. The Compose file limits the container to 512 MB and one CPU; measured with 250 Devices probed in one sweep, CertFabric peaks at about 105 MiB (`scripts/measure_footprint.py`).
 
+To use a released image instead of building one, replace `build: .` and `image: certfabric` in `docker-compose.yml` with `image: ghcr.io/albal/certfabric:latest`, and use that name in the `generate-key` command. Images are published for amd64 and arm64, and tagged with each version as well as `latest`.
+
 ### Proxmox LXC
 
-Create a Debian 12 container (512 MB, 1 core is enough), then run [`deploy/lxc/install.sh`](deploy/lxc/install.sh) inside it as root. The header of the script shows the `pct` commands. It installs CertFabric under `/opt/certfabric`, generates `/etc/certfabric/secret.key`, and runs it as the `certfabric` systemd service on port 8080. Re-run it to upgrade.
+Create a Debian 12 container (512 MB, 1 core is enough), then run [`deploy/lxc/install.sh`](deploy/lxc/install.sh) inside it as root. The header of the script shows the `pct` commands. It installs CertFabric, with its own Python and Node.js, under `/opt/certfabric`, generates `/etc/certfabric/secret.key`, and runs it as the `certfabric` systemd service on port 8080. Re-run it to upgrade.
 
 ### From source
+
+Needs Python 3.14 or later and Node.js 26.
 
 ```sh
 uv sync
@@ -81,3 +85,13 @@ cd frontend && npm run dev   # dashboard on :5173, proxying to `certfabric serve
 ```
 
 Tests drive the real application with a fake clock, a fake `acme.sh` and simulated devices; see `tests/fakes/`.
+
+## Releasing
+
+Update `version` in `pyproject.toml`, run `uv lock`, merge that to `main`, then push a tag:
+
+```sh
+git tag v1.2.3 && git push origin v1.2.3
+```
+
+[`release.yml`](.github/workflows/release.yml) runs the tests, publishes the image to `ghcr.io/albal/certfabric` and creates a GitHub Release. A tag with a suffix, such as `v1.2.3-rc.1`, is published as a pre-release and does not move `latest`.
