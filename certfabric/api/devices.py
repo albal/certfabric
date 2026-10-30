@@ -18,7 +18,7 @@ from certfabric.api.deps import get_db
 from certfabric.certificates import covers
 from certfabric.deployments import DeploymentInProgress, DeploymentRefused, reset_failures
 from certfabric.models import Certificate, DeploymentLog, Device
-from certfabric.plugins.base import DeviceCredentials
+from certfabric.plugins.base import DeviceCredentials, trim_settings
 from certfabric.probe import probe
 from certfabric.secrets_display import mask
 from certfabric.vault import Vault
@@ -66,6 +66,10 @@ class DeviceCredentialsOut(BaseModel):
     extra: dict[str, str]
 
 
+def _trim_options(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    return None if value is None else trim_settings(value)
+
+
 class DeviceCreate(BaseModel):
     name: str = Field(min_length=1)
     hostname: str
@@ -79,6 +83,7 @@ class DeviceCreate(BaseModel):
 
     _host = field_validator("hostname")(_check_host)
     _sni = field_validator("sni")(_check_sni)
+    _options = field_validator("plugin_options")(_trim_options)
 
 
 class DeviceUpdate(BaseModel):
@@ -93,6 +98,7 @@ class DeviceUpdate(BaseModel):
 
     _host = field_validator("hostname")(_check_host)
     _sni = field_validator("sni")(_check_sni)
+    _options = field_validator("plugin_options")(_trim_options)
 
 
 class PresentedCertificate(BaseModel):

@@ -211,7 +211,7 @@ export function KeyValueEditor({
   );
 }
 
-export const toObject = (rows: [string, string][]) => Object.fromEntries(rows.filter(([k]) => k.trim()).map(([k, v]) => [k.trim(), v]));
+export const toObject = (rows: [string, string][]) => Object.fromEntries(rows.filter(([k]) => k.trim()).map(([k, v]) => [k.trim(), v.trim()]));
 
 export function useFormError() {
   return useState<string | null>(null);

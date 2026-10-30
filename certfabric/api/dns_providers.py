@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from certfabric.api.deps import get_db
 from certfabric.models import DnsProvider
+from certfabric.plugins.base import trim_settings
 from certfabric.secrets_display import mask_all
 from certfabric.vault import Vault
 
@@ -30,6 +31,7 @@ def _check_credentials(value: dict[str, str] | None) -> dict[str, str] | None:
         return None
     if not value:
         raise ValueError("At least one credential is required")
+    value = trim_settings(value)
     for key in value:
         if not _ENV_NAME.match(key) or _FORBIDDEN_ENV.match(key):
             raise ValueError(f"{key!r} is not an allowed credential name")

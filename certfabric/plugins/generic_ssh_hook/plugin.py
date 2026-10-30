@@ -85,9 +85,12 @@ class GenericSshHookPlugin(BaseDevicePlugin):
         async with await self._connect() as conn, conn.start_sftp_client() as sftp:
             for option, remote_path in targets.items():
                 content, mode = files[option]
-                async with sftp.open(remote_path, "w") as remote:
-                    await remote.write(content)
-                await sftp.chmod(remote_path, mode)
+                try:
+                    async with sftp.open(remote_path, "w") as remote:
+                        await remote.write(content)
+                    await sftp.chmod(remote_path, mode)
+                except asyncssh.SFTPError as exc:
+                    raise PluginError(f"Could not write {remote_path} as {self.credentials.username}: {exc.reason}") from None
                 self.log(f"Uploaded {option.removesuffix('_path')} to {remote_path}")
             if command := self.options.get("reload_command"):
                 self.log(f"Running reload command: {command}")

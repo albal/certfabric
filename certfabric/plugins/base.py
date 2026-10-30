@@ -13,12 +13,17 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # device_tls_context is re-exported for Plugins: pass it as httpx's `verify=` when talking to a Device.
 from certfabric.probe import device_tls_context, probe  # noqa: F401
 
 TARGET_CATEGORIES = ("printer", "bmc", "hypervisor", "network", "generic")
+
+
+def trim_settings(values: dict[str, Any]) -> dict[str, Any]:
+    """Keys and string values without surrounding whitespace, which pasted values often bring along."""
+    return {key.strip(): value.strip() if isinstance(value, str) else value for key, value in values.items()}
 
 
 class DeviceCredentials(BaseModel):
@@ -29,6 +34,8 @@ class DeviceCredentials(BaseModel):
         default=None, description="Only for devices that need a fixed PKCS#12 passphrase"
     )
     extra: dict[str, str] = Field(default_factory=dict, description="Additional secrets a Plugin needs")
+
+    _trim_extra = field_validator("extra")(trim_settings)
 
     def secrets(self) -> list[str]:
         values = [self.password, self.api_token, self.pfx_passphrase, *self.extra.values()]
@@ -81,7 +88,7 @@ class BaseDevicePlugin(ABC):
         self.port = port
         self.credentials = credentials
         self.use_tls = use_tls
-        self.options = options or {}
+        self.options = trim_settings(options or {})
         self.sni = sni
         self.log = log or (lambda _line: None)
 

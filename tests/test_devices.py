@@ -4,11 +4,37 @@ from datetime import timedelta
 
 import pytest
 
+from certfabric.plugins.base import DeviceCredentials
+from certfabric.plugins.generic_ssh_hook.plugin import GenericSshHookPlugin
 from tests.conftest import create_device
 from tests.fakes.certs import fingerprint, self_signed
 from tests.fakes.tls_device import FakeTlsDevice
 
 CREDS = {"username": "admin", "password": "printer-password-123", "api_token": "tok-abcdefghijklmnop"}
+
+
+async def test_options_and_extra_secrets_are_saved_without_surrounding_whitespace(client, tls_device):
+    device = await create_device(
+        client,
+        tls_device,
+        plugin_options={" key_path ": "/etc/ssl/device.key   ", "verify_timeout": 30, "reset": False},
+    )
+    assert device["plugin_options"] == {"key_path": "/etc/ssl/device.key", "verify_timeout": 30, "reset": False}
+
+    updated = await client.patch(f"/api/devices/{device['id']}", json={"plugin_options": {"key_path": "\t/new.key\n"}})
+    assert updated.json()["plugin_options"] == {"key_path": "/new.key"}
+
+
+def test_extra_secrets_are_trimmed_even_when_read_back_from_storage():
+    credentials = DeviceCredentials(**{"extra": {" ssh_password ": "  secret-value  "}})
+    assert credentials.extra == {"ssh_password": "secret-value"}
+
+
+def test_plugins_receive_stored_options_without_surrounding_whitespace():
+    plugin = GenericSshHookPlugin(
+        "host", 22, DeviceCredentials(), options={"key_path": "/etc/ssl/device.key   ", " ssh_port ": 2222, "off": False}
+    )
+    assert plugin.options == {"key_path": "/etc/ssl/device.key", "ssh_port": 2222, "off": False}
 
 
 async def test_create_list_update_delete(client, tls_device):

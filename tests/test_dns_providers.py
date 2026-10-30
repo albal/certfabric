@@ -17,6 +17,13 @@ async def test_create_list_get_masks_credentials(client):
     assert fetched == created
 
 
+async def test_credentials_are_saved_without_surrounding_whitespace(client, app):
+    body = {**CF, "credentials": {" CF_Token ": "  cf-token-0123456789abcd  "}}
+    created = (await client.post("/api/dns-providers", json=body)).json()
+    assert list(created["credentials"]) == ["CF_Token"]
+    assert created["credentials"]["CF_Token"].endswith("abcd")
+
+
 async def test_credentials_are_encrypted_at_rest(client, settings):
     await client.post("/api/dns-providers", json=CF)
     row = sqlite3.connect(settings.db_path).execute("SELECT encrypted_credentials FROM dns_providers").fetchone()
