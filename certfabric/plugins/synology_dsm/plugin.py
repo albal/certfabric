@@ -18,6 +18,7 @@ Options:
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -38,6 +39,8 @@ TIMEOUT_SECONDS = 60
 ENTRY = "/webapi/entry.cgi"
 # The Description given to a certificate this Plugin adds, when the `description` option is not set.
 DEFAULT_DESCRIPTION = "CertFabric"
+# DSM's nginx answers every path on ports 80 and 443 with a page naming the real ports.
+REDIRECT_PAGE_HTTPS_PORT = re.compile(r'id="https"[^>]*value="(\d+)"')
 TWO_FACTOR = "This account uses 2-factor authentication; use a dedicated administrator without it"
 LOGIN_ERRORS = {
     400: "DSM rejected the username or password",
@@ -107,6 +110,8 @@ class SynologyDsmPlugin(BaseDevicePlugin):
             "/webapi/query.cgi",
             params={"api": "SYNO.API.Info", "version": 1, "method": "query", "query": "SYNO.API.Auth"},
         )
+        if redirect := REDIRECT_PAGE_HTTPS_PORT.search(response.text):
+            raise PluginError(f"Port {self.port} is DSM's redirect page; set the Device's port to {redirect[1]}")
         api = _data(response, "The API query").get("SYNO.API.Auth")
         if not api:
             raise PluginError("DSM did not list its login API; is this Synology DSM?")
@@ -126,7 +131,11 @@ class SynologyDsmPlugin(BaseDevicePlugin):
             },
         )
         data = _data(response, "Login", LOGIN_ERRORS)
-        return _Session(api["path"], api["maxVersion"], data["sid"], data.get("synotoken"))
+        token = data.get("synotoken")
+        if token:
+            # Without this header DSM answers every later call with error 119, invalid session.
+            client.headers["X-SYNO-TOKEN"] = token
+        return _Session(api["path"], api["maxVersion"], data["sid"], token)
 
     async def _logout(self, client: httpx.AsyncClient, session: _Session) -> None:
         """Best effort: the web server may be restarting, and DSM expires the session by itself."""

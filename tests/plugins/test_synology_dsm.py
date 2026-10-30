@@ -115,6 +115,13 @@ async def test_reports_a_device_that_is_not_dsm(simulator, make_plugin):
     assert not result.success and "Synology DSM" in result.message
 
 
+async def test_points_at_the_https_port_when_given_the_redirect_port(simulator, make_plugin):
+    simulator.redirect_only = True
+    result = await make_plugin(GOOD, print).test_connection()
+    assert not result.success
+    assert result.message == f"Port {simulator.port} is DSM's redirect page; set the Device's port to 5001"
+
+
 async def test_import_failure_fails_the_deployment_and_logs_out(simulator, make_plugin):
     simulator.import_error = 5536
     with pytest.raises(PluginError, match="5536"):
