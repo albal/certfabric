@@ -63,6 +63,7 @@ flowchart LR
 | `frontend/` | The dashboard: React, TanStack Router and Query, Tailwind, Vite |
 | `tests/fakes/` | Device simulators, a fake `acme.sh`, a webhook receiver |
 | `deploy/lxc/`, `Dockerfile` | Packaging |
+| `.github/workflows/` | `tests.yml` runs the tests; `release.yml` publishes the image from a version tag |
 
 ## Background work
 

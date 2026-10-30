@@ -3,7 +3,7 @@ name = "certfabric"
 version = "0.1.0"
 readme = "README.md"
 description = "Agentless certificate lifecycle management for LAN and homelab devices"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
