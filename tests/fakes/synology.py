@@ -1,9 +1,13 @@
-"""A simulated Synology DSM: the web API on its TLS port, serving whichever certificate is the default."""
+"""A simulated Synology DSM: the web API on its TLS port, serving the certificate bound to the system service.
+
+As on a real NAS, being the default certificate moves no services: they stay where they are bound.
+"""
 
 from __future__ import annotations
 
+import json
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from tests.fakes.https_device import FakeHttpsDevice, Request, Response
 
@@ -14,6 +18,19 @@ PLAIN_USERNAME = "not-an-admin"
 FACTORY_ID = "FaCtOrY"
 FACTORY_DESC = "synology.factory"
 
+
+SYSTEM_SERVICE = {
+    "display_name": "DSM Desktop Service",
+    "display_name_i18n": "common:web_desktop",
+    "isPkg": False,
+    "multiple_cert": True,
+    "owner": "root",
+    "service": "default",
+    "subscriber": "system",
+    "user_setable": True,
+}
+FTPS_SERVICE = {**SYSTEM_SERVICE, "display_name": "FTPS", "service": "ftpd", "subscriber": "smbftpd"}
+FIXED_SERVICE = {**SYSTEM_SERVICE, "display_name": "Fixed", "service": "fixed", "user_setable": False}
 
 # What DSM's nginx serves on ports 80 and 443 for any path, whatever the request.
 REDIRECT_PAGE = b"""<!DOCTYPE html>
@@ -43,6 +60,8 @@ class StoredCertificate:
     cert_pem: str
     key_pem: str
     inter_pem: str = ""
+    services: list[dict] = field(default_factory=list)
+    common_name: str = ""
 
 
 class FakeSynology:
@@ -51,6 +70,8 @@ class FakeSynology:
         self.certificates: list[StoredCertificate] = []
         self.logins = 0
         self.import_error: int | None = None
+        self.service_error: int | None = None
+        self.service_sets = 0
         self.not_dsm = False
         self.redirect_only = False
         self.fail_logout = False
@@ -70,7 +91,9 @@ class FakeSynology:
 
     async def start(self) -> FakeSynology:
         await self.https.start()
-        factory = StoredCertificate(FACTORY_ID, FACTORY_DESC, True, self.https.cert_pem, self.https.key_pem)
+        factory = StoredCertificate(
+            FACTORY_ID, FACTORY_DESC, True, self.https.cert_pem, self.https.key_pem, services=[SYSTEM_SERVICE, FTPS_SERVICE]
+        )
         self.certificates.append(factory)
         return self
 
@@ -80,8 +103,23 @@ class FakeSynology:
     def add_certificate(self, id: str, desc: str) -> None:
         self.certificates.append(StoredCertificate(id, desc, False, "", ""))
 
+    def bind_services_elsewhere(self, id: str, desc: str, *extra_services: dict) -> None:
+        """Move every service to a separate, non-default certificate, which keeps being served."""
+        factory = self.by_id(FACTORY_ID)
+        self.certificates.append(
+            StoredCertificate(id, desc, False, factory.cert_pem, factory.key_pem, services=[*factory.services, *extra_services])
+        )
+        factory.services = []
+
     def by_id(self, id: str) -> StoredCertificate:
         return next(c for c in self.certificates if c.id == id)
+
+    def service_names(self, id: str) -> list[str]:
+        return [service["display_name"] for service in self.by_id(id).services]
+
+    def _serve_system_certificate(self) -> None:
+        bound = next(c for c in self.certificates if SYSTEM_SERVICE in c.services)
+        self.https.present(bound.cert_pem + bound.inter_pem, bound.key_pem)
 
     async def _handle(self, request: Request) -> Response:
         if self.not_dsm:
@@ -99,6 +137,8 @@ class FakeSynology:
             return self._list(request)
         if api == "SYNO.Core.Certificate":
             return self._import(request)
+        if api == "SYNO.Core.Certificate.Service":
+            return self._set_services(request)
         return error(102)
 
     def _auth(self, request: Request) -> Response:
@@ -132,7 +172,18 @@ class FakeSynology:
         if self._sessions[sid] == "plain":
             return error(105)
         return ok(
-            {"certificates": [{"id": c.id, "desc": c.desc, "is_default": c.is_default} for c in self.certificates]}
+            {
+                "certificates": [
+                    {
+                        "id": c.id,
+                        "desc": c.desc,
+                        "is_default": c.is_default,
+                        "services": c.services,
+                        "subject": {"common_name": c.common_name},
+                    }
+                    for c in self.certificates
+                ]
+            }
         )
 
     def _import(self, request: Request) -> Response:
@@ -154,6 +205,21 @@ class FakeSynology:
         if form.get("as_default") == "true":
             for certificate in self.certificates:
                 certificate.is_default = certificate is stored
-        default = next(c for c in self.certificates if c.is_default)
-        self.https.present(default.cert_pem + default.inter_pem, default.key_pem)
+        self._serve_system_certificate()
         return ok({"id": stored.id, "restart_httpd": True})
+
+    def _set_services(self, request: Request) -> Response:
+        form = request.form()
+        if not self._authenticated(request, form.get("_sid")):
+            return error(119)
+        if self.service_error is not None:
+            return error(self.service_error)
+        self.service_sets += 1
+        for setting in json.loads(form["settings"]):
+            old, new, service = self.by_id(setting["old_id"]), self.by_id(setting["id"]), setting["service"]
+            # DSM 6 drops a service "moved" to the certificate it is already on.
+            assert old is not new and service in old.services and service.get("user_setable", True)
+            old.services.remove(service)
+            new.services.append(service)
+        self._serve_system_certificate()
+        return ok({"restart_httpd": True})

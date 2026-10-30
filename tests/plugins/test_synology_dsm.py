@@ -96,6 +96,69 @@ async def test_connection_names_the_certificate_it_will_replace(make_plugin):
     assert result.success and synology.FACTORY_DESC in result.message
 
 
+async def test_names_a_certificate_with_no_description_by_its_subject(simulator, make_plugin):
+    factory = simulator.by_id(synology.FACTORY_ID)
+    factory.desc, factory.common_name = "", "*.office.example.com"
+    lines = []
+    plugin = make_plugin(GOOD, lines.append)
+    assert "'*.office.example.com'" in (await plugin.test_connection()).message
+    await deploy(plugin)
+    assert any("'*.office.example.com'" in line for line in lines)
+    assert factory.desc == ""  # DSM keeps it as the admin left it
+
+
+async def test_moves_services_bound_to_another_certificate(simulator, make_plugin):
+    simulator.bind_services_elsewhere("rs200", "TSEW")
+    plugin = make_plugin(GOOD, print)
+    assert "move 2 services" in (await plugin.test_connection()).message
+    cert = await deploy(plugin)
+    assert await plugin.post_deployment_verify(cert.fingerprint_sha256)
+    assert simulator.service_names(synology.FACTORY_ID) == ["DSM Desktop Service", "FTPS"]
+    assert simulator.service_names("rs200") == []
+    assert simulator.by_id("rs200").cert_pem  # the other certificate is left on the NAS
+
+
+async def test_moves_services_to_a_newly_added_default(simulator, make_plugin):
+    plugin = make_plugin(GOOD, print, description="Fresh")
+    cert = await deploy(plugin)
+    assert await plugin.post_deployment_verify(cert.fingerprint_sha256)
+    fresh = next(c for c in simulator.certificates if c.desc == "Fresh")
+    assert simulator.service_names(fresh.id) == ["DSM Desktop Service", "FTPS"]
+
+
+async def test_leaves_services_already_on_the_certificate_alone(simulator, make_plugin):
+    await deploy(make_plugin(GOOD, print))
+    assert simulator.service_sets == 0
+
+
+async def test_leaves_services_alone_for_a_certificate_that_is_not_the_default(simulator, make_plugin):
+    simulator.add_certificate("other", "Reverse proxy")
+    await deploy(make_plugin(GOOD, print, description="Reverse proxy"))
+    assert simulator.service_sets == 0
+
+
+async def test_leaves_services_alone_when_told_to(simulator, make_plugin):
+    simulator.bind_services_elsewhere("rs200", "TSEW")
+    plugin = make_plugin(GOOD, print, assign_services=False)
+    assert "move" not in (await plugin.test_connection()).message
+    await deploy(plugin)
+    assert simulator.service_sets == 0
+
+
+async def test_does_not_move_services_dsm_marks_as_fixed(simulator, make_plugin):
+    simulator.bind_services_elsewhere("rs200", "TSEW", synology.FIXED_SERVICE)
+    await deploy(make_plugin(GOOD, print))
+    assert simulator.service_names("rs200") == ["Fixed"]
+
+
+async def test_service_failure_fails_the_deployment_and_logs_out(simulator, make_plugin):
+    simulator.bind_services_elsewhere("rs200", "TSEW")
+    simulator.service_error = 5598
+    with pytest.raises(PluginError, match="5598"):
+        await deploy(make_plugin(GOOD, print))
+    assert simulator.open_sessions == 0
+
+
 @pytest.mark.parametrize(
     ("username", "message"),
     [
