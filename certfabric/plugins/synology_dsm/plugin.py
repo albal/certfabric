@@ -2,22 +2,26 @@
 
 Set the Device's port to DSM's HTTPS port (5001 unless changed in Control Panel > Login Portal).
 
-The certificate replaces DSM's default certificate in place, so the services bound to it keep
-working and pick up the new one. DSM restarts its web server if it needs to, which briefly
-interrupts the web interface. On a NAS with several certificates, use the `description` option
-to replace a different one.
+The certificate replaces DSM's default certificate in place, then every service still on another
+certificate is moved to it, since DSM's default does not by itself change which certificate a
+service uses. Other certificates stay on the NAS. DSM restarts its web server if it needs to,
+which briefly interrupts the web interface.
 
 Credentials: username + password of a local administrator. DSM asks a 2-factor account for a
 code at every login, so this needs a dedicated account without 2-factor authentication.
 Options:
   description      the DSM certificate to replace, by its Description in Control Panel > Security >
-                   Certificate. If none matches, a new one is added and made the default.
+                   Certificate. If none matches, a new one is added and made the default. Services
+                   are only moved to a default certificate, so one that is not stays as it is.
+  assign_services  move services to the default certificate (default true); set false to keep
+                   services on purpose on other certificates
   verify_timeout   seconds to wait for DSM to serve the new certificate (default 60)
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -152,34 +156,73 @@ class SynologyDsmPlugin(BaseDevicePlugin):
         except httpx.HTTPError as exc:
             self.log(f"Could not log out of DSM: {describe(exc)}")
 
-    async def _target(self, client: httpx.AsyncClient, session: _Session) -> dict[str, Any] | None:
-        """The DSM certificate to replace, or None to add a new one."""
+    async def _certificates(self, client: httpx.AsyncClient, session: _Session) -> list[dict[str, Any]]:
         response = await client.post(
             ENTRY, data={"api": "SYNO.Core.Certificate.CRT", "version": 1, "method": "list", "_sid": session.sid}
         )
-        certificates = _data(response, "Listing certificates").get("certificates", [])
+        return _data(response, "Listing certificates").get("certificates", [])
+
+    def _target(self, certificates: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """The DSM certificate to replace, or None to add a new one."""
         if description := self.options.get("description"):
             return next((c for c in certificates if c.get("desc") == str(description)), None)
         return next((c for c in certificates if c.get("is_default")), None)
 
+    @staticmethod
+    def _name(certificate: dict[str, Any]) -> str:
+        """DSM's default certificate often has no Description, so fall back to the name it was issued for."""
+        return certificate.get("desc") or (certificate.get("subject") or {}).get("common_name") or certificate["id"]
+
     def _new_description(self) -> str:
         return str(self.options.get("description") or DEFAULT_DESCRIPTION)
+
+    def _services_to_move(self, certificates: list[dict[str, Any]], *target_ids: str) -> list[dict[str, Any]]:
+        """Settings moving services off every other certificate. DSM 6 drops a service set to its own certificate."""
+        if not self.options.get("assign_services", True):
+            return []
+        return [
+            {"service": service, "old_id": certificate["id"]}
+            for certificate in certificates
+            if certificate["id"] not in target_ids
+            for service in certificate.get("services") or []
+            if service.get("user_setable", True)
+        ]
+
+    async def _assign_services(
+        self, client: httpx.AsyncClient, session: _Session, moves: list[dict[str, Any]], certificate_id: str
+    ) -> None:
+        names = ", ".join(str(move["service"].get("display_name")) for move in moves)
+        self.log(f"Moving DSM services to the new certificate: {names}")
+        settings = [{**move, "id": certificate_id} for move in moves]
+        response = await client.post(
+            ENTRY,
+            data={
+                "api": "SYNO.Core.Certificate.Service",
+                "version": 1,
+                "method": "set",
+                "_sid": session.sid,
+                "settings": json.dumps(settings, separators=(",", ":")),
+            },
+        )
+        _data(response, "Moving services")
 
     async def test_connection(self) -> PluginValidationResult:
         try:
             async with self._client() as client, self._session(client) as session:
-                target = await self._target(client, session)
+                certificates = await self._certificates(client, session)
         except PluginError as exc:
             return PluginValidationResult(success=False, message=str(exc))
         except httpx.HTTPError as exc:
             return PluginValidationResult(success=False, message=f"DSM unreachable: {describe(exc)}")
+        target = self._target(certificates)
         if target is None:
-            return PluginValidationResult(
-                success=True, message=f"Signed in; will add a certificate named {self._new_description()!r}"
-            )
-        return PluginValidationResult(
-            success=True, message=f"Signed in; will replace the certificate named {target.get('desc')!r}"
-        )
+            message = f"Signed in; will add a certificate named {self._new_description()!r}"
+        else:
+            message = f"Signed in; will replace the certificate named {self._name(target)!r}"
+        if target is None or target.get("is_default"):
+            if moves := self._services_to_move(certificates, target["id"] if target else ""):
+                message += f" and move {len(moves)} services to it"
+        return PluginValidationResult(success=True, message=message)
 
     async def deploy_certificate(
         self, cert_pem: str, privkey_pem: str, fullchain_pem: str, pfx_bundle: bytes, pfx_password: str | None
@@ -192,7 +235,8 @@ class SynologyDsmPlugin(BaseDevicePlugin):
             files["inter_cert"] = ("chain.pem", "".join(intermediates).encode(), "application/octet-stream")
         try:
             async with self._client() as client, self._session(client) as session:
-                target = await self._target(client, session)
+                certificates = await self._certificates(client, session)
+                target = self._target(certificates)
                 if target is None:
                     fields = {"id": "", "desc": self._new_description(), "as_default": "true"}
                     self.log(f"Adding certificate {fields['desc']!r} to DSM as the default")
@@ -200,7 +244,8 @@ class SynologyDsmPlugin(BaseDevicePlugin):
                     fields = {"id": target["id"], "desc": target.get("desc", "")}
                     if target.get("is_default"):
                         fields["as_default"] = "true"
-                    self.log(f"Replacing DSM certificate {fields['desc']!r}")
+                    self.log(f"Replacing DSM certificate {self._name(target)!r}")
+                moves = self._services_to_move(certificates, fields["id"]) if "as_default" in fields else []
                 params = {"api": "SYNO.Core.Certificate", "version": 1, "method": "import", "_sid": session.sid}
                 if session.token:
                     params["SynoToken"] = session.token
@@ -208,6 +253,13 @@ class SynologyDsmPlugin(BaseDevicePlugin):
                 data = _data(response, "Certificate import")
                 if data.get("restart_httpd"):
                     self.log("DSM is restarting its web server")
+                # DSM may give a replaced certificate a new id, so take the one it reports.
+                certificate_id = data.get("id") or fields["id"]
+                moves = [move for move in moves if move["old_id"] != certificate_id]
+                if moves:
+                    if not certificate_id:
+                        raise PluginError("DSM did not say which certificate it imported")
+                    await self._assign_services(client, session, moves, certificate_id)
         except httpx.HTTPError as exc:
             raise PluginError(f"DSM unreachable: {describe(exc)}") from None
         return True
