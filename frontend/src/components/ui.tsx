@@ -189,14 +189,28 @@ export function KeyValueEditor({
         {rows.map(([key, value], i) => (
           <div key={i} className="flex gap-2">
             <input aria-label={`${label} name ${i + 1}`} className={inputClass} placeholder="NAME" value={key} onChange={(e) => update(i, 0, e.target.value)} />
-            <input
-              aria-label={`${label} value ${i + 1}`}
-              className={inputClass}
-              type={secret ? "password" : "text"}
-              placeholder="value"
-              value={value}
-              onChange={(e) => update(i, 1, e.target.value)}
-            />
+            {secret ? (
+              // A textarea, so a pasted private key keeps its line breaks; masked like a password field.
+              <textarea
+                aria-label={`${label} value ${i + 1}`}
+                className={`${inputClass} font-mono [-webkit-text-security:disc]`}
+                rows={value.includes("\n") ? 4 : 1}
+                placeholder="value"
+                spellCheck={false}
+                autoComplete="off"
+                value={value}
+                onChange={(e) => update(i, 1, e.target.value)}
+              />
+            ) : (
+              <input
+                aria-label={`${label} value ${i + 1}`}
+                className={inputClass}
+                type="text"
+                placeholder="value"
+                value={value}
+                onChange={(e) => update(i, 1, e.target.value)}
+              />
+            )}
             <Button variant="secondary" onClick={() => onChange(rows.filter((_, j) => j !== i))}>
               ✕
             </Button>

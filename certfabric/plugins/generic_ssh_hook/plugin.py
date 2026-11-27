@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncssh
 
 from certfabric.plugins.base import BaseDevicePlugin, PluginError, PluginValidationResult
+from certfabric.plugins.ssh_keys import import_ssh_private_key
 
 TIMEOUT_SECONDS = 30
 
@@ -34,7 +35,7 @@ class GenericSshHookPlugin(BaseDevicePlugin):
             "connect_timeout": TIMEOUT_SECONDS,
         }
         if key := creds.extra.get("ssh_private_key"):
-            kwargs["client_keys"] = [asyncssh.import_private_key(key)]
+            kwargs["client_keys"] = [import_ssh_private_key(key)]
         elif creds.password:
             kwargs["password"] = creds.password
             kwargs["client_keys"] = None

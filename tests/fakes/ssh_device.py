@@ -16,6 +16,7 @@ from tests.fakes.tls_device import FakeTlsDevice
 USERNAME = "deploy"
 PASSWORD = "ssh-password-0123456789"
 RELOAD_COMMAND = "reload-tls"
+CLIENT_KEY = asyncssh.generate_private_key("ssh-ed25519")  # the only key the server accepts
 
 
 class _Server(asyncssh.SSHServer):
@@ -27,6 +28,12 @@ class _Server(asyncssh.SSHServer):
 
     def validate_password(self, username: str, password: str) -> bool:
         return username == USERNAME and password == PASSWORD
+
+    def public_key_auth_supported(self) -> bool:
+        return True
+
+    def validate_public_key(self, username: str, key: asyncssh.SSHKey) -> bool:
+        return username == USERNAME and key.public_data == CLIENT_KEY.public_data
 
 
 CommandHandler = Callable[[str], tuple[int, str]]

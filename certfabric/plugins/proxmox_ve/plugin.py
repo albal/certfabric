@@ -32,6 +32,7 @@ from certfabric.plugins.base import (
     describe,
     device_tls_context,
 )
+from certfabric.plugins.ssh_keys import import_ssh_private_key
 
 TIMEOUT_SECONDS = 30
 
@@ -130,7 +131,7 @@ class ProxmoxVePlugin(BaseDevicePlugin):
             ),
         }
         if key := extra.get("ssh_private_key"):
-            kwargs["client_keys"] = [asyncssh.import_private_key(key)]
+            kwargs["client_keys"] = [import_ssh_private_key(key)]
         else:
             kwargs["password"] = extra["ssh_password"]
             kwargs["client_keys"] = None
