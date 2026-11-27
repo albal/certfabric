@@ -109,6 +109,22 @@ async def test_device_options_are_trimmed_before_they_are_typed(client, page, tl
     assert (await client.get("/api/devices")).json()[0]["plugin_options"] == {"reset": False}
 
 
+async def test_pasted_private_key_keeps_its_line_breaks(client, page, tls_device):
+    key = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\nBG5vbmUAAAAEbm9uZQ==\n-----END OPENSSH PRIVATE KEY-----"
+    await sign_in(page)
+    await page.get_by_role("link", name="Add Device").click()
+    await page.get_by_label("Name", exact=True).fill("Keyed")
+    await page.get_by_label("Plugin").select_option("fake_device")
+    await page.get_by_label("Hostname or IP").fill(tls_device.host)
+    await page.get_by_label("Port").fill(str(tls_device.port))
+    await page.get_by_role("button", name="+ Add extra secrets").click()
+    await page.get_by_label("Extra secrets name 1").fill("ssh_private_key")
+    await page.get_by_label("Extra secrets value 1").fill(key)
+    async with page.expect_request(lambda r: r.method == "POST" and r.url.endswith("/api/devices")) as request:
+        await page.get_by_role("button", name="Add Device").click()
+    assert (await request.value).post_data_json["credentials"]["extra"] == {"ssh_private_key": key}
+
+
 async def test_testing_a_connection_shows_progress(client, page):
     release = asyncio.Event()
 

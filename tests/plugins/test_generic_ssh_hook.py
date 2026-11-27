@@ -97,3 +97,24 @@ async def test_unpinned_host_key_is_logged(simulator, make_plugin, good_credenti
     lines = []
     await make_plugin(good_credentials, lines.append).test_connection()
     assert any("not pinned" in line for line in lines)
+
+
+@pytest.mark.parametrize(
+    "pasted",
+    [
+        pytest.param(ssh_device.CLIENT_KEY.export_private_key().decode(), id="as-exported"),
+        pytest.param(ssh_device.CLIENT_KEY.export_private_key().decode().replace("\n", ""), id="line-breaks-dropped"),
+        pytest.param(ssh_device.CLIENT_KEY.export_private_key("pkcs8-pem").decode().replace("\n", " "), id="pkcs8-on-one-line"),
+    ],
+)
+async def test_private_key_login_survives_lost_line_breaks(make_plugin, pasted):
+    credentials = DeviceCredentials(username=ssh_device.USERNAME, extra={"ssh_private_key": pasted})
+    result = await make_plugin(credentials, print).test_connection()
+    assert result.success, result.message
+
+
+async def test_unusable_private_key_is_reported(make_plugin):
+    credentials = DeviceCredentials(username=ssh_device.USERNAME, extra={"ssh_private_key": "not a key"})
+    result = await make_plugin(credentials, print).test_connection()
+    assert not result.success
+    assert result.message.startswith("ssh_private_key is not a usable private key")
